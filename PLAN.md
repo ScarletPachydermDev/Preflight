@@ -201,6 +201,15 @@ surface is these, and nothing else:
 The right shape is a small backend per emulator behind that list, chosen by
 which one the shortcut points at.
 
+**AppImage builds are a separate problem from a second emulator.** §3 relies on
+loading the emulator's own `libSDL2.so` off disk, which works because a flatpak
+unpacks its files. An AppImage keeps everything inside a squashfs image, so
+there is no library sitting on the filesystem to load. Either mount or extract
+it once and cache the result, or read the AppImage's SDL version and apply the
+matching GUID rules without loading it at all. This applies to a Ryubing
+AppImage as much as to another emulator — same emulator, different packaging,
+and the id computation breaks.
+
 **What will differ, and what to expect:**
 
 - **Dolphin** keeps controller setup in INI files, not JSON, with its own
