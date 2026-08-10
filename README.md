@@ -4,6 +4,8 @@
 
 Check every controller works — *before* the game starts
 
+<img src=".github/screenshot.jpg" alt="Four controllers shown in colour-coded player bays, each with its buttons drawn live">
+
 </div>
 
 ---
