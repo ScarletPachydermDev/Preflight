@@ -10,18 +10,37 @@ Check every controller works — *before* the game starts
 
 ---
 
-Local multiplayer on an emulator usually goes like this: three people sit down,
-the game loads, and only then does someone find out their pad is Player 3
-instead of Player 1, or that A does B, or that their controller never woke up
-at all. Then everyone waits while you troubleshoot.
+> *[grainy black-and-white footage of a man surrounded by four controllers]*
 
-Preflight sits between your Steam shortcut and the emulator. Everyone sees
-their own controller on screen, presses buttons to confirm they land where the
-labels say, and feels a rumble to know which player they are. When it looks
-right, Player 1 holds `+` and the game starts.
+**Are you TIRED of being Player 3 in your own living room?**
+
+Sick of pressing **A** and getting **B**? Of a left stick that works perfectly
+everywhere *except* in the game? Of one controller somehow driving two players
+at once, while a third pad you definitely turned on does nothing at all?
+
+Have you ever sat down with three friends, started a race, and discovered that
+Bluetooth quietly decided tonight's player order while you were making tea?
+
+> *"I pair them in the same order EVERY TIME."*
+> — you, moments before it happens again
+
+*[man throws controller. it lands on the sofa. nobody knows whose it is]*
+
+**There has to be a better way!**
+
+---
+
+*[colour returns. triumphant music]*
+
+There is. Preflight sits between your Steam shortcut and the emulator.
+Everyone sees their own controller on screen, presses buttons to confirm they
+land where the labels say, and feels a rumble telling them which player they
+are. When it all looks right, Player 1 holds `+` and the game starts.
 
 It writes the emulator's controller config on the way through, so what you see
-on the check screen is what the game gets.
+on the check screen is what the game actually gets.
+
+No more troubleshooting while three people wait. **No more being Player 3.**
 
 ## Requirements
 
