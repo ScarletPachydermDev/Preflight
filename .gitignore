@@ -1,0 +1,12 @@
+# Runtime state. known_pads.json holds the MAC address of every controller
+# ever seen, and launch.log records ROM paths — none of that belongs in a
+# public repository.
+state/
+
+# Diagnostic dumps from phase0.py. These contain controller MACs and the
+# host's own Bluetooth adapter address, which identifies the machine.
+reports/
+*.json.bak
+
+__pycache__/
+*.pyc

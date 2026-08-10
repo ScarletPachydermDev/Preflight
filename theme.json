@@ -1,0 +1,20 @@
+{
+  "_comment": "Delete any key to fall back to the built-in default. Colours are #rrggbb. rumble.gap_ms is the silence between pads - raise it to slow the cycle down. strength is 0-65535. A bad value is skipped with a warning, never fatal.",
+  "players": [
+    "#e85d5d",
+    "#569ce8",
+    "#e8ba52",
+    "#6cc782"
+  ],
+  "background": "#121218",
+  "card": "#20222a",
+  "text": "#e8e9ee",
+  "dim": "#8c8f9b",
+  "warning": "#e8b45a",
+  "error": "#e26a6a",
+  "rumble": {
+    "on_ms": 320,
+    "gap_ms": 900,
+    "strength": 40960
+  }
+}
