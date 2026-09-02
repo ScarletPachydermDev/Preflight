@@ -4,10 +4,15 @@
 #   Target:         /home/deck/preflight/preflight.sh
 #   Launch Options: "/run/media/deck/mSD/ROMs/Switch/Your Game.nsp"
 #
-# Set that shortcut's controller layout to Steam Input DISABLED, so the Xbox,
-# Stadia and 8BitDo reach Ryujinx as real hardware. The Steam Controller stays
-# virtual either way — Valve always manages its own pad — and it is the only
-# virtual one, so nothing can collide with it.
+# Set that shortcut's controller layout to Steam Input ENABLED. That is the
+# configuration this has been proven on: every pad arrives as an identical
+# Valve virtual controller, and preflight tells them apart by reading the
+# physical devices Steam hides and matching each one to its virtual twin.
+# The Steam Controller only reaches the emulator this way at all.
+#
+# With Steam Input disabled the pads arrive as real hardware, which is the
+# simpler path on paper, but it has not been tested end to end here and the
+# Steam Controller drops out of the game entirely.
 #
 # If a run fails, the log below is the place to look; Steam gives us no
 # terminal in Game Mode.
