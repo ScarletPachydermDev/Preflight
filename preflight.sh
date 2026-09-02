@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Steam shortcut target for preflight.
 #
-#   Target:         /home/deck/preflight/launch.sh
+#   Target:         /home/deck/preflight/preflight.sh
 #   Launch Options: "/run/media/deck/mSD/ROMs/Switch/Your Game.nsp"
 #
 # Set that shortcut's controller layout to Steam Input DISABLED, so the Xbox,

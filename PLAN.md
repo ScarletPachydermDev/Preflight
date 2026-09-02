@@ -37,7 +37,7 @@ Do not drift from this without testing:
 
 - **Steam Input ENABLED** on the shortcut. Counter-intuitive, and the opposite
   of where this project started. See §5.
-- Shortcut target `~/preflight/launch.sh`, ROM path quoted in Launch
+- Shortcut target `~/preflight/preflight.sh`, ROM path quoted in Launch
   Options, one shortcut per game.
 - `flatpak override --user --filesystem=/run/media/deck/mSD/ROMs/Switch:ro
   io.github.ryubing.Ryujinx` — the flatpak otherwise has no access to the SD
@@ -72,7 +72,7 @@ exact name-CRC hit.
 ## 4. Architecture
 
 ```
-launch.sh        Steam shortcut target; logs to state/launch.log
+preflight.sh     Steam shortcut target; logs to state/launch.log
 preflight.py     the tool: model, config writer, screen, launcher
 sdlui.py         ctypes bindings for system libSDL2 + libSDL2_ttf
 theme.json       colours and rumble pacing
@@ -228,7 +228,7 @@ Gridge (the user's shortcut-creation project) installs this to
 `~/.local/share/gridge/preflight/` and points Steam shortcuts at it. This is a
 separate repository, so that boundary is the API and should not shift casually:
 
-- **`launch.sh` is the entry point.** One argument, the ROM path. Everything
+- **`preflight.sh` is the entry point.** One argument, the ROM path. Everything
   else inside this project can be rewritten freely.
 - **`VERSION`** is a plain version string, so Gridge can tell what it installed
   and offer an update.

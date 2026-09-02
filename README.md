@@ -52,7 +52,7 @@ Preflight talks to the libraries already on the system.
 
 Copy this folder to the machine/deck, then add a non-Steam shortcut per game:
 
-- **Target:** `/path/to/preflight/launch.sh`
+- **Target:** `/path/to/preflight/preflight.sh`
 - **Launch Options:** the ROM path, in quotes
 - **Controller layout:** Steam Input **enabled** — see below
 
