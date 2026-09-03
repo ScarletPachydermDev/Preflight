@@ -42,11 +42,73 @@ from sdlui import (UI, BTN_A, BTN_B, BTN_X, BTN_Y, BTN_START, BTN_BACK,
                    BUTTON_NAMES, SWITCH_EQUIVALENT, SDLK_ESCAPE)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATE_DIR = os.path.join(HERE, "state")
-KNOWN_PADS = os.path.join(STATE_DIR, "known_pads.json")
-GAMES_FILE = os.path.join(HERE, "games.json")
-BACKUP_DIR = os.path.join(STATE_DIR, "backups")
 VERSION_FILE = os.path.join(HERE, "VERSION")
+
+# Nothing the user owns lives beside the code. SelfSteam embeds this project
+# and replaces the whole directory when it updates, so the install folder has
+# to be disposable: state and config live under the XDG paths instead, and
+# HERE holds only code plus the shipped defaults.
+
+
+def _xdg(env, fallback):
+    base = os.environ.get(env) or os.path.expanduser(fallback)
+    return os.path.join(base, "preflight")
+
+
+STATE_DIR = os.environ.get("PREFLIGHT_STATE_DIR") or _xdg(
+    "XDG_STATE_HOME", "~/.local/state")
+CONFIG_DIR = os.environ.get("PREFLIGHT_CONFIG_DIR") or _xdg(
+    "XDG_CONFIG_HOME", "~/.config")
+
+KNOWN_PADS = os.path.join(STATE_DIR, "known_pads.json")
+BACKUP_DIR = os.path.join(STATE_DIR, "backups")
+
+LEGACY_STATE_DIR = os.path.join(HERE, "state")
+
+
+def user_file(name):
+    """A user-editable file: their copy under CONFIG_DIR if it exists,
+    otherwise the default we ship."""
+    mine = os.path.join(CONFIG_DIR, name)
+    return mine if os.path.exists(mine) else os.path.join(HERE, name)
+
+
+def adopt_user_files():
+    """First run after the move: lift state out of the install directory, and
+    take a copy of the shipped defaults the user is allowed to edit.
+
+    Copying rather than editing in place is the whole point — an update can
+    then delete the install folder outright without destroying anything.
+    Existing files are never overwritten.
+    """
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+    except OSError:
+        return
+
+    # launch.log is deliberately left behind: it is history, not settings, and
+    # the shell has already written this run's header to the new location.
+    for name in ("known_pads.json", "backups"):
+        src = os.path.join(LEGACY_STATE_DIR, name)
+        dst = os.path.join(STATE_DIR, name)
+        if not os.path.exists(src) or os.path.exists(dst):
+            continue
+        try:
+            shutil.move(src, dst)
+            print(f"moved {name} to {STATE_DIR}", flush=True)
+        except OSError as exc:
+            print(f"could not move {name}: {exc}", file=sys.stderr)
+
+    for name in ("theme.json", "games.json"):
+        src = os.path.join(HERE, name)
+        dst = os.path.join(CONFIG_DIR, name)
+        if not os.path.exists(src) or os.path.exists(dst):
+            continue
+        try:
+            shutil.copy2(src, dst)
+        except OSError as exc:
+            print(f"could not copy {name}: {exc}", file=sys.stderr)
 
 
 def read_version():
@@ -81,7 +143,7 @@ PLAYER_COLORS = [
     (108, 199, 130),   # P4 green
 ]
 
-THEME_FILE = os.path.join(HERE, "theme.json")
+
 
 
 def blend(base, tint, amount):
@@ -98,7 +160,7 @@ def _hex_to_rgb(value):
 def apply_theme():
     """Overlay theme.json onto the defaults. Bad entries are skipped, not fatal
     — a typo in a colour should never stop you launching a game."""
-    theme = load_json(THEME_FILE, {})
+    theme = load_json(user_file("theme.json"), {})
     if not theme:
         return
     global BG, CARD, FG, DIM, ACCENT, WARN, BAD, PLAYER_COLORS
@@ -1328,7 +1390,7 @@ def launch(app_id, rom, dry_run):
 def game_expectation(rom):
     if not rom:
         return None
-    games = load_json(GAMES_FILE, {})
+    games = load_json(user_file("games.json"), {})
     base = os.path.basename(rom)
     for k, v in games.items():
         if k == base or k in base:
@@ -1350,6 +1412,7 @@ def main():
     if rom and not os.path.exists(rom):
         print(f"ROM not found: {rom}", file=sys.stderr)
 
+    adopt_user_files()
     apply_theme()
 
     sdl, ttf = sdlui.load_libraries()

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Runs phase0.py and saves both a readable report and a JSON dump into
-# ./reports/. Safe to use as a Steam shortcut target — Steam gives us no
-# visible terminal, so everything is captured to disk.
+# Runs phase0.py and saves both a readable report and a JSON dump into the
+# state directory. Safe to use as a Steam shortcut target — Steam gives us
+# no visible terminal, so everything is captured to disk.
 #
 # Auto-names the output by which world it detected itself in, so you can't
 # mix up the Steam-Input-on and Steam-Input-off runs.
 
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT="$DIR/reports"
+STATE_DIR="${PREFLIGHT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/preflight}"
+OUT="$STATE_DIR/reports"
 mkdir -p "$OUT"
 
 if [ -n "${1:-}" ]; then

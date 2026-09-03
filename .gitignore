@@ -1,10 +1,10 @@
-# Runtime state. known_pads.json holds the MAC address of every controller
-# ever seen, and launch.log records ROM paths — none of that belongs in a
-# public repository.
+# Runtime state and diagnostics now live outside the install directory (see
+# PLAN.md section 8), but these are kept ignored so a pre-move checkout, or a
+# stray local run, can never commit them: known_pads.json holds the MAC address
+# of every controller ever seen, launch.log records ROM paths, and phase0's
+# reports include the host's own Bluetooth adapter address, which identifies
+# the machine.
 state/
-
-# Diagnostic dumps from phase0.py. These contain controller MACs and the
-# host's own Bluetooth adapter address, which identifies the machine.
 reports/
 *.json.bak
 

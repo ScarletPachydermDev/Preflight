@@ -19,8 +19,13 @@
 
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-mkdir -p "$DIR/state"
-LOG="$DIR/state/launch.log"
+
+# State lives outside the install directory, so SelfSteam can replace this
+# folder wholesale without destroying known_pads.json. Must agree with the
+# paths preflight.py computes.
+STATE_DIR="${PREFLIGHT_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/preflight}"
+mkdir -p "$STATE_DIR"
+LOG="$STATE_DIR/launch.log"
 
 # Version goes in the header rather than coming from preflight.py, so a run
 # that dies before Python gets going still records which build it was.

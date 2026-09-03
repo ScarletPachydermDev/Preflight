@@ -104,7 +104,22 @@ goes in **Target**, the quoted ROM path goes in **Launch Options**.
 | `preflight.sh --dry-run "<rom>"` | everything except writing config and launching |
 | `preflight.py --version` | print the version and exit |
 
-Each run writes its version and ROM to `state/launch.log`.
+Each run writes its version and ROM to `~/.local/state/preflight/launch.log`.
+
+### Where things live
+
+Nothing you own sits next to the code, so the install folder can be replaced
+wholesale by an update without losing anything:
+
+| `~/.config/preflight/` | `theme.json`, `games.json` — yours to edit |
+|:---|:---|
+| **`~/.local/state/preflight/`** | **`known_pads.json`, `launch.log`, config backups, reports** |
+| **the install folder** | **code and shipped defaults only** |
+
+On first run Preflight moves any older state out of the install folder and
+takes a copy of the shipped `theme.json` and `games.json` for you, so nothing
+is lost on the way. Set `PREFLIGHT_STATE_DIR` or `PREFLIGHT_CONFIG_DIR` to put
+them somewhere else; otherwise the usual `XDG_*` variables are honoured.
 
 ## Using it
 
@@ -125,7 +140,7 @@ ABXY are Nintendo controller layout and is set by default WSIWYG,
 press the button marked A and the circle marked A lights. If you would rather match physical position than labels, `L`
 +`R` mirrors it for your pad only, and Preflight remembers.
 
-Colours and rumble pacing live in `theme.json`.
+Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 
 ## What it checks
 
@@ -147,7 +162,7 @@ Colours and rumble pacing live in `theme.json`.
 
 ## Troubleshooting
 
-`state/launch.log` records each run. If it ends at `window ready`, Preflight
+`~/.local/state/preflight/launch.log` records each run. If it ends at `window ready`, Preflight
 started fine and the problem is elsewhere. If there is no entry at all, Steam
 never launched it — Steam sometimes believes a shortcut is still running and
 the Play button silently does nothing, which a Steam restart clears.

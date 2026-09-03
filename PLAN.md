@@ -72,14 +72,15 @@ exact name-CRC hit.
 ## 4. Architecture
 
 ```
-preflight.sh     Steam shortcut target; logs to state/launch.log
+preflight.sh     Steam shortcut target; logs to the state dir
 preflight.py     the tool: model, config writer, screen, launcher
 sdlui.py         ctypes bindings for system libSDL2 + libSDL2_ttf
-theme.json       colours and rumble pacing
-games.json       optional per-game notes
+theme.json       shipped default; the user's copy lives in CONFIG_DIR
+games.json       shipped default; the user's copy lives in CONFIG_DIR
 phase0.py        standalone diagnostics, kept for future debugging
-run-report.sh    wrapper that saves phase0 output to reports/
-state/           known_pads.json, backups/, launch.log
+run-report.sh    wrapper that saves phase0 output to STATE_DIR/reports
+(no state/)      known_pads.json, backups/, launch.log all live
+                 outside the install directory — see section 8
 ```
 
 Zero dependencies. SteamOS has no pip and a read-only `/usr`, so everything
@@ -125,7 +126,7 @@ fire at once). That is what turns `Steam pad f679` into
   template, so a hole there is invisible — the tool reads inputs through SDL
   and shows them working while the emulator gets nothing. The roster warns up
   front when the config being cloned has gaps.
-- Back up to `state/backups/`, write to a temp file, `os.replace()`.
+- Back up to `STATE_DIR/backups/`, write to a temp file, `os.replace()`.
 
 ## 5. Design decisions worth not undoing
 
@@ -244,9 +245,10 @@ The boundary is the API and should not shift casually:
 - **`preflight.sh` is the entry point.** One argument, the ROM path. Everything
   else inside this project can be rewritten freely.
 - **`VERSION`** is a plain version string, so SelfSteam can report which build
-  it shipped — it is written into every `state/launch.log` run header.
-- **`state/` is user data, not code.** SelfSteam must never ship it, and it is
-  gitignored, since `known_pads.json` accumulates controller MAC addresses.
+  it shipped — it is written into every `launch.log` run header.
+- **State and config live outside the install directory**, so SelfSteam never
+  has to ship or preserve them. `known_pads.json` accumulates controller MAC
+  addresses and must stay out of the repository either way.
 
 ### Updating must not wipe the user's data
 
@@ -262,17 +264,26 @@ name and its own mirror setting across sessions; wiping it means every
 controller is a stranger again and every player's swap silently reverts to the
 default. That is the tool failing at exactly the job it exists to do.
 
-So an update replaces **code only** — `preflight.py`, `sdlui.py`,
-`preflight.sh`, `phase0.py`, `run-report.sh`, `VERSION`, and the docs — and
-never touches `state/`. `theme.json` and `games.json` should be written only if
-absent, never overwritten.
+This is why none of them live in the install directory any more (done
+2026-09-03). Paths resolve as:
 
-The sturdier version of the same idea, worth doing before the first SelfSteam
-release: let the install directory be entirely disposable by moving user data
-out of it. `STATE_DIR` is currently hardcoded as `HERE/state`; honouring an
-environment variable or an XDG path would let SelfSteam replace the whole
-folder wholesale — the simplest possible update — with nothing of the user's
-inside it to lose.
+```
+STATE_DIR   $PREFLIGHT_STATE_DIR  | $XDG_STATE_HOME/preflight  | ~/.local/state/preflight
+CONFIG_DIR  $PREFLIGHT_CONFIG_DIR | $XDG_CONFIG_HOME/preflight | ~/.config/preflight
+```
+
+`theme.json` and `games.json` ship as defaults in the install folder and are
+read through `user_file()`, which prefers the user's copy in `CONFIG_DIR`.
+`adopt_user_files()` runs at startup: it moves any legacy `state/` contents out
+of the install directory and copies the shipped defaults into `CONFIG_DIR` if
+they are not there yet. It never overwrites an existing file, so it is safe to
+run on every launch, and it leaves the old `launch.log` behind because that is
+history rather than settings.
+
+**So SelfSteam's update is simply: delete the install directory and unpack the
+new one.** There is nothing of the user's inside it to lose. `preflight.sh` and
+`run-report.sh` compute the same paths in shell and must be kept in step with
+`preflight.py` if the rules ever change.
 
 SelfSteam's side of the job: detect emulators (`flatpak list`, plus browse for
 AppImages), read each emulator's own configured game folders so the user never
