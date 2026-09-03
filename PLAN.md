@@ -222,20 +222,59 @@ failed, and there is no reason to think the next emulator lacks its own. Run
 `phase0.py` against it, write one config by hand from the emulator's own UI,
 then read back exactly what it wrote and compare. That is what found both.
 
-## 8. Contract with Gridge
+## 8. Contract with SelfSteam
 
-Gridge (the user's shortcut-creation project) installs this to
-`~/.local/share/gridge/preflight/` and points Steam shortcuts at it. This is a
-separate repository, so that boundary is the API and should not shift casually:
+SelfSteam (the user's shortcut-creation project, formerly Gridge) **embeds**
+this rather than installing it as a neighbour: Preflight ships inside SelfSteam
+and updates whenever SelfSteam updates. Nobody is expected to install or update
+it on its own.
+
+Preflight keeps its own repository — github.com/ScarletPachydermDev/Preflight —
+which is upstream. The copy inside SelfSteam is downstream and must never be
+edited in place, or the two diverge silently and the version number starts
+lying. Whether that copy arrives by submodule, subtree or a sync script is
+SelfSteam's choice; what matters is that it is a copy of a tagged upstream
+state and not a fork.
+
+Installed to `~/.local/share/selfsteam/preflight/`, with Steam shortcuts
+pointed at it.
+
+The boundary is the API and should not shift casually:
 
 - **`preflight.sh` is the entry point.** One argument, the ROM path. Everything
   else inside this project can be rewritten freely.
-- **`VERSION`** is a plain version string, so Gridge can tell what it installed
-  and offer an update.
-- **`state/` is runtime-only** — Gridge must never ship it, and it is
+- **`VERSION`** is a plain version string, so SelfSteam can report which build
+  it shipped — it is written into every `state/launch.log` run header.
+- **`state/` is user data, not code.** SelfSteam must never ship it, and it is
   gitignored, since `known_pads.json` accumulates controller MAC addresses.
 
-Gridge's side of the job: detect emulators (`flatpak list`, plus browse for
+### Updating must not wipe the user's data
+
+Three things in the install folder belong to the user, not to the release:
+
+| `state/known_pads.json` | every controller's identity and its A/B swap preference |
+|:---|:---|
+| **`theme.json`** | **colours and rumble pacing** |
+| **`games.json`** | **per-game expectations** |
+
+`known_pads.json` is the one that hurts. It is what lets a pad keep its real
+name and its own mirror setting across sessions; wiping it means every
+controller is a stranger again and every player's swap silently reverts to the
+default. That is the tool failing at exactly the job it exists to do.
+
+So an update replaces **code only** — `preflight.py`, `sdlui.py`,
+`preflight.sh`, `phase0.py`, `run-report.sh`, `VERSION`, and the docs — and
+never touches `state/`. `theme.json` and `games.json` should be written only if
+absent, never overwritten.
+
+The sturdier version of the same idea, worth doing before the first SelfSteam
+release: let the install directory be entirely disposable by moving user data
+out of it. `STATE_DIR` is currently hardcoded as `HERE/state`; honouring an
+environment variable or an XDG path would let SelfSteam replace the whole
+folder wholesale — the simplest possible update — with nothing of the user's
+inside it to lose.
+
+SelfSteam's side of the job: detect emulators (`flatpak list`, plus browse for
 AppImages), read each emulator's own configured game folders so the user never
 enters a ROM path, list the games with a per-game toggle for the controller
 check, then create shortcuts with SteamGridDB artwork, enable Steam Input on
