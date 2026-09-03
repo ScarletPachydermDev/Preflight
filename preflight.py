@@ -778,7 +778,7 @@ sdl.SDL_Quit()
 """
 
 
-def find_emulator_sdl():
+def find_emulator_sdl(exe=None):
     """Path to the libSDL2 Ryujinx actually links against.
 
     This matters more than it looks. SDL changed the bus type it reports for
@@ -789,20 +789,31 @@ def find_emulator_sdl():
     perfectly in this tool.
     """
     import glob
+    if exe:
+        # A tar.gz build — or an AppImage we have already extracted — keeps its
+        # libraries beside the binary. Deliberately no falling back to the
+        # flatpak's copy afterwards: borrowing one install's SDL to compute ids
+        # for another is the exact mismatch this function exists to prevent.
+        base = os.path.dirname(os.path.abspath(exe))
+        for pattern in ("libSDL2*.so*", "lib/libSDL2*.so*"):
+            hits = sorted(glob.glob(os.path.join(base, pattern)))
+            if hits:
+                return hits[0]
+        return None
     for root in ("/var/lib/flatpak/app", os.path.expanduser("~/.local/share/flatpak/app")):
         for path in glob.glob(f"{root}/*yu*/*/*/*/files/bin/libSDL2*.so*"):
             return path
     return None
 
 
-def emulator_gamepads():
+def emulator_gamepads(exe=None):
     """(index, guid_hex, name) as Ryujinx's own SDL will see them.
 
     Run in a throwaway subprocess: two libSDL2 builds share a SONAME, so
     loading both in one process gets us whichever landed first — the UI keeps
     the system SDL, this borrows the emulator's.
     """
-    lib = find_emulator_sdl()
+    lib = find_emulator_sdl(exe)
     if not lib:
         return None
     try:
@@ -859,6 +870,13 @@ def command_target(cmd):
     return os.path.basename(cmd[0])
 
 
+def command_exe(cmd):
+    """The executable a command runs, or None when it goes through flatpak."""
+    if not cmd or os.path.basename(cmd[0]) == "flatpak":
+        return None
+    return cmd[0]
+
+
 def backend_for(target):
     """The config backend that handles this target, or None if we have none
     — in which case the check still runs, it just writes nothing."""
@@ -894,11 +912,32 @@ def find_app_id():
     return DEFAULT_APP_ID
 
 
-def find_config(app_id):
-    for path in (os.path.expanduser(f"~/.var/app/{app_id}/config/Ryujinx/Config.json"),
-                 os.path.expanduser(
-                     f"~/.var/app/{DEFAULT_APP_ID}/config/Ryujinx/Config.json"),
-                 os.path.expanduser("~/.config/Ryujinx/Config.json")):
+def find_config(app_id=None, exe=None):
+    """Config.json for the install we are actually about to launch.
+
+    A flatpak keeps it inside its own ~/.var/app sandbox; an AppImage or tar
+    build uses ~/.config/Ryujinx, or a "portable" folder beside the binary.
+    Confusing the two is a silent failure: we would write the flatpak's config
+    and then launch the AppImage, which reads somewhere else entirely and
+    behaves exactly as if the tool had done nothing.
+    """
+    candidates = []
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        candidates.append(os.path.join(base, "portable", "Config.json"))
+    elif app_id:
+        candidates.append(os.path.expanduser(
+            f"~/.var/app/{app_id}/config/Ryujinx/Config.json"))
+        if app_id != DEFAULT_APP_ID:
+            candidates.append(os.path.expanduser(
+                f"~/.var/app/{DEFAULT_APP_ID}/config/Ryujinx/Config.json"))
+    else:
+        candidates.append(os.path.expanduser(
+            f"~/.var/app/{DEFAULT_APP_ID}/config/Ryujinx/Config.json"))
+    # Stable and Canary share this one unless portable mode is on.
+    candidates.append(os.path.expanduser("~/.config/Ryujinx/Config.json"))
+
+    for path in candidates:
         if os.path.isfile(path):
             return path
     return None
@@ -1098,15 +1137,16 @@ def build_entries(existing, pads, rows=None):
     return out, problems
 
 
-def write_config(cfg_path, pads):
+def write_config(cfg_path, pads, exe=None):
     data = load_json(cfg_path, None)
     if data is None:
         return ["cannot read Config.json"]
 
-    rows = emulator_gamepads()
+    rows = emulator_gamepads(exe)
     if rows is None:
         problems_pre = ["Could not read the emulator's own SDL — ids may not "
-                        "match. Is Ryujinx installed as a flatpak?"]
+                        "match. Flatpak and tar builds are supported; an "
+                        "AppImage keeps its libraries inside the image."]
     else:
         problems_pre = []
     entries, problems = build_entries(data.get("input_config") or [], pads, rows)
@@ -1487,8 +1527,10 @@ def main():
         backend = "ryujinx"
         cmd = ["flatpak", "run", target, "-f"] + ([rom] if rom else [])
 
-    print(f"target: {target or 'unknown'}; backend: {backend or 'none'}",
-          flush=True)
+    exe = command_exe(cmd)
+    app_id = None if exe else target
+    print(f"target: {target or 'unknown'}; backend: {backend or 'none'}"
+          f"{'; exe: ' + exe if exe else ''}", flush=True)
 
     adopt_user_files()
     apply_theme()
@@ -1502,7 +1544,7 @@ def main():
     ui = UI(sdl, ttf)
     print(f"window ready: {ui.w}x{ui.h}", flush=True)
     known = load_json(KNOWN_PADS, {})
-    cfg_path = find_config(target) if backend == "ryujinx" else None
+    cfg_path = find_config(app_id, exe) if backend == "ryujinx" else None
     needed = game_expectation(rom)
 
     slots = new_slot_state()
@@ -1696,7 +1738,7 @@ def main():
                 result, state = ["Ryujinx Config.json not found."], "error"
                 continue
             remember(pads, known)
-            problems = write_config(cfg_path, pads)
+            problems = write_config(cfg_path, pads, exe)
             if problems:
                 result, state = problems, "error"
                 continue

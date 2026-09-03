@@ -216,12 +216,27 @@ exec'd — the roster screen warns that no bindings will be written, and pad
 identities are still remembered. That makes Preflight useful in front of an
 emulator it knows nothing about.
 
-**AppImage support is planned, with one thing to solve.** §3 loads the
-emulator's own `libSDL2.so` off disk, which works because a flatpak unpacks its
-files; an AppImage keeps them inside a squashfs image. Worth trying: extract or
-mount it once and cache the library, or read its SDL version and apply the
-matching rules without loading it. If neither turns out practical, flatpak-only
-is a fine place to land.
+**Non-flatpak Ryujinx builds, as of 2026-09-03.** Two of the three pieces
+are done. `find_config()` no longer confuses installs: a flatpak target uses
+its `~/.var/app` sandbox, a binary target uses a `portable/` folder beside it
+or `~/.config/Ryujinx`, and neither falls through to the other. That crossover
+was a silent failure — write the flatpak's config, launch the AppImage, and it
+looks exactly like the tool having done nothing. `find_emulator_sdl(exe)` now
+looks beside the binary, so **tar builds work**, and it deliberately does not
+fall back to the flatpak's library: mixing one install's SDL with another's is
+the mismatch the function exists to prevent.
+
+What remains is **AppImage**, and it is only §3's problem: the bundled
+`libSDL2.so` sits inside a squashfs image. `--appimage-extract 'usr/lib/libSDL2*'`
+pulls just that file out; cache it under `STATE_DIR` keyed by the image's size
+and mtime and the cost is paid once per emulator update. `--appimage-mount` is
+tidier but wants FUSE. First, though, check whether Ryubing's AppImages bundle
+SDL at all or link the system one — if they link it, there is nothing to solve.
+
+**Canary needs no backend of its own.** It ships only as AppImage or tar, and
+on Linux it shares `~/.config/Ryujinx` with stable unless portable mode is on,
+so the same config writer covers both. The `ryujinx` needle in `BACKENDS`
+already matches a Canary AppImage filename.
 
 **What will differ, and what to expect:**
 

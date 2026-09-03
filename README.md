@@ -41,7 +41,9 @@ people wait while you work out whose controller is which and inputs work.
 ## Requirements
 
 - SteamOS or a Linux system with Steam
-- Ryubing (Ryujinx) installed as a Flatpak
+- Ryubing (Ryujinx) installed as a Flatpak or unpacked from a tar build.
+  An AppImage launches fine, but its bindings cannot be written yet — see
+  Limitations
 - SDL2 and SDL2_ttf — already present on SteamOS
 
 No Python packages to install. SteamOS has no `pip` and a read-only `/usr`, so
@@ -146,6 +148,11 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - If a pad sleeps or wakes in the moment between saving and the emulator
   starting, its assignment can shift.
 - Preflight don't pair controllers. Pair them in your OS first.
+- **AppImage builds launch but get no bindings written.** Controller ids
+  have to be computed with the emulator's own copy of SDL, and an AppImage
+  keeps its libraries sealed inside the image. Flatpak and tar builds are
+  fine. Stable and Canary share `~/.config/Ryujinx`, so either one picks up
+  what the other was given.
 
 ## Troubleshooting
 
