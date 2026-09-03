@@ -22,9 +22,17 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$DIR/state"
 LOG="$DIR/state/launch.log"
 
+# Version goes in the header rather than coming from preflight.py, so a run
+# that dies before Python gets going still records which build it was.
+VERSION="$(cat "$DIR/VERSION" 2>/dev/null || true)"
+
+ROM="${1:-}"
+case "$ROM" in --*) ROM="" ;; esac   # a flag is not a ROM
+
 {
     echo "=== $(date '+%Y-%m-%d %H:%M:%S') ==="
-    echo "rom: ${1:-<none, opening Ryujinx game list>}"
+    echo "preflight ${VERSION:-unknown}"
+    echo "rom: ${ROM:-<none, opening Ryujinx game list>}"
 } >>"$LOG"
 
 # Not exec'd: keeping this shell alive for the pipeline means Steam continues

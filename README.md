@@ -76,6 +76,36 @@ off, that pad reaches Preflight but never reaches the emulator.
 
 Though tool can be used without Steam input if you prefer.
 
+## How to use
+
+Preflight replaces the `flatpak run` command — it does not wrap one. Without
+it, you would start a game like this:
+
+```bash
+flatpak run io.github.ryubing.Ryujinx -f "/run/media/deck/mSD/ROMs/Switch/Mario Kart 8 Deluxe.nsp"
+```
+
+With Preflight you pass only the ROM. It finds the emulator itself, runs the
+controller check, writes the config and then hands over:
+
+```bash
+~/preflight/preflight.sh "/run/media/deck/mSD/ROMs/Switch/Mario Kart 8 Deluxe.nsp"
+```
+
+Keep the quotes — ROM names have spaces in them.
+
+In Steam that one command is split across the two shortcut fields: the script
+goes in **Target**, the quoted ROM path goes in **Launch Options**.
+
+| Command | What it does |
+|:---|:---|
+| `preflight.sh "<rom>"` | check controllers, then launch that game |
+| `preflight.sh` | check controllers, then open the Ryujinx game list |
+| `preflight.sh --dry-run "<rom>"` | everything except writing config and launching |
+| `preflight.py --version` | print the version and exit |
+
+Each run writes its version and ROM to `state/launch.log`.
+
 ## Using it
 
 There is one screen, and **taps do nothing** — so everyone can mash buttons to

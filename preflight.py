@@ -8,6 +8,7 @@ labelling, writes Ryujinx's Config.json, then launches the game.
     preflight.py "/path/to/Game.nsp"     # check, then launch that ROM
     preflight.py                         # check, then open the Ryujinx list
     preflight.py --dry-run "<rom>"       # everything except writing/launching
+    preflight.py --version               # print the version and exit
 
 Zero dependencies: ctypes against the system libSDL2 and libSDL2_ttf.
 
@@ -45,6 +46,19 @@ STATE_DIR = os.path.join(HERE, "state")
 KNOWN_PADS = os.path.join(STATE_DIR, "known_pads.json")
 GAMES_FILE = os.path.join(HERE, "games.json")
 BACKUP_DIR = os.path.join(STATE_DIR, "backups")
+VERSION_FILE = os.path.join(HERE, "VERSION")
+
+
+def read_version():
+    """Our version, from the VERSION file sitting beside this script."""
+    try:
+        with open(VERSION_FILE) as fh:
+            return fh.read().strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+VERSION = read_version()
 
 DEFAULT_APP_ID = "io.github.ryubing.Ryujinx"
 MAX_PLAYERS = 4
@@ -1326,6 +1340,9 @@ def game_expectation(rom):
 
 def main():
     args = [a for a in sys.argv[1:]]
+    if "--version" in args:
+        print(f"preflight {VERSION}")
+        return 0
     dry_run = "--dry-run" in args
     args = [a for a in args if not a.startswith("--")]
     rom = args[0] if args else None
