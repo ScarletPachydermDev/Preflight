@@ -200,7 +200,21 @@ surface is these, and nothing else:
 | `launch` | how the game is started |
 
 The right shape is a small backend per emulator behind that list, chosen by
-which one the shortcut points at.
+which one the shortcut points at — and since 2026-09-03 the shortcut says so
+outright. `preflight.sh -- <command>` passes the launch command through
+verbatim; `command_target()` pulls the flatpak app id (or binary name) out of
+it, and `backend_for()` matches that against the `BACKENDS` table. Adding an
+emulator therefore starts with one line in `BACKENDS` and ends with the
+functions above.
+
+Guessing was the old way and it does not survive a second Switch emulator:
+`find_app_id()` grepped `flatpak list` for "ryu", and no ROM path can say
+whether a `.nsp` is meant for Ryujinx or Eden.
+
+With no matching backend, the check still runs and the command is still
+exec'd — the roster screen warns that no bindings will be written, and pad
+identities are still remembered. That makes Preflight useful in front of an
+emulator it knows nothing about.
 
 **AppImage support is planned, with one thing to solve.** §3 loads the
 emulator's own `libSDL2.so` off disk, which works because a flatpak unpacks its
@@ -242,8 +256,9 @@ pointed at it.
 
 The boundary is the API and should not shift casually:
 
-- **`preflight.sh` is the entry point.** One argument, the ROM path. Everything
-  else inside this project can be rewritten freely.
+- **`preflight.sh` is the entry point.** Either `-- <command to run>`, which
+  is the form SelfSteam should generate, or a bare ROM path for the Ryujinx
+  shorthand. Everything else inside this project can be rewritten freely.
 - **`VERSION`** is a plain version string, so SelfSteam can report which build
   it shipped — it is written into every `launch.log` run header.
 - **State and config live outside the install directory**, so SelfSteam never

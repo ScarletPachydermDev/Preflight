@@ -78,33 +78,43 @@ Though tool can be used without Steam input if you prefer.
 
 ## How to use
 
-Preflight replaces the `flatpak run` command — it does not wrap one. Without
-it, you would start a game like this:
+Preflight wraps the command that would have started your game. Without it you
+would run something like:
 
 ```bash
 flatpak run io.github.ryubing.Ryujinx -f "/run/media/deck/mSD/ROMs/Switch/Mario Kart 8 Deluxe.nsp"
 ```
 
-With Preflight you pass only the ROM. It finds the emulator itself, runs the
-controller check, writes the config and then hands over:
+With it, put `preflight.sh --` in front of exactly that:
 
 ```bash
-~/preflight/preflight.sh "/run/media/deck/mSD/ROMs/Switch/Mario Kart 8 Deluxe.nsp"
+~/preflight/preflight.sh -- flatpak run io.github.ryubing.Ryujinx -f "/run/media/deck/mSD/ROMs/Switch/Mario Kart 8 Deluxe.nsp"
 ```
 
-Keep the quotes — ROM names have spaces in them.
+Everything after `--` is left alone and run once the check passes. It is also
+how Preflight knows *which* emulator it is setting up, which matters as soon as
+you have more than one installed — `.nsp` alone cannot tell Ryujinx from Eden.
 
-In Steam that one command is split across the two shortcut fields: the script
-goes in **Target**, the quoted ROM path goes in **Launch Options**.
+In Steam the same thing splits across the two shortcut fields: the script goes
+in **Target**, and everything from `--` onwards goes in **Launch Options**.
 
 | Command | What it does |
 |:---|:---|
-| `preflight.sh "<rom>"` | check controllers, then launch that game |
-| `preflight.sh` | check controllers, then open the Ryujinx game list |
+| `preflight.sh -- <command>` | check controllers, then run that command |
+| `preflight.sh "<rom>"` | shorthand: check, then launch that ROM in Ryujinx |
+| `preflight.sh` | check, then open the Ryujinx game list |
 | `preflight.sh --dry-run "<rom>"` | everything except writing config and launching |
 | `preflight.py --version` | print the version and exit |
 
-Each run writes its version and ROM to `~/.local/state/preflight/launch.log`.
+Keep the quotes around ROM paths — they have spaces in them.
+
+**If Preflight has no backend for what you point it at**, it says so on screen,
+runs the check anyway and still launches. You get the "who is holding what"
+screen in front of any emulator; you just do not get its bindings written.
+Ryubing (Ryujinx) is the only backend today.
+
+Each run writes its version and what it was asked to launch to
+`~/.local/state/preflight/launch.log`.
 
 ### Where things live
 

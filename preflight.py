@@ -5,10 +5,16 @@ preflight — controller gate for Ryubing (Ryujinx) on SteamOS.
 Confirms which physical controller is which player, verifies the face-button
 labelling, writes Ryujinx's Config.json, then launches the game.
 
-    preflight.py "/path/to/Game.nsp"     # check, then launch that ROM
+    preflight.py -- flatpak run <app-id> -f "<rom>"   # check, then run that
+    preflight.py "/path/to/Game.nsp"     # same, assuming Ryujinx
     preflight.py                         # check, then open the Ryujinx list
     preflight.py --dry-run "<rom>"       # everything except writing/launching
     preflight.py --version               # print the version and exit
+
+Everything after a bare "--" is the command to exec once the check passes.
+Preflight reads the emulator out of that command and picks its config backend
+from it; with no backend for what it finds, it still runs the check and still
+launches, it just writes no bindings.
 
 Zero dependencies: ctypes against the system libSDL2 and libSDL2_ttf.
 
@@ -814,6 +820,66 @@ def emulator_gamepads():
     return rows or None
 
 
+# Emulators we know how to configure, and the substrings that identify them in
+# a flatpak app id or a binary name. Adding one here is not enough on its own —
+# see PLAN.md section 7 for the functions a new backend has to supply.
+BACKENDS = {
+    "ryujinx": ("ryujinx", "ryubing"),
+}
+
+
+def split_command(argv):
+    """argv -> (flags, positionals, command).
+
+    Everything after a bare "--" is the command to run once the check passes,
+    and is never interpreted here — its flags belong to the emulator, not us.
+    """
+    if "--" in argv:
+        cut = argv.index("--")
+        head, cmd = argv[:cut], argv[cut + 1:]
+    else:
+        head, cmd = argv, []
+    flags = [a for a in head if a.startswith("--")]
+    positional = [a for a in head if not a.startswith("--")]
+    return flags, positional, cmd
+
+
+def command_target(cmd):
+    """What a launch command actually runs: a flatpak app id, or a binary
+    name. Returns None when we cannot tell."""
+    if not cmd:
+        return None
+    if os.path.basename(cmd[0]) == "flatpak":
+        rest = cmd[1:]
+        if rest and rest[0] == "run":
+            for arg in rest[1:]:
+                if not arg.startswith("-"):
+                    return arg          # first non-flag after "run"
+        return None
+    return os.path.basename(cmd[0])
+
+
+def backend_for(target):
+    """The config backend that handles this target, or None if we have none
+    — in which case the check still runs, it just writes nothing."""
+    if not target:
+        return None
+    low = target.lower()
+    for name, needles in BACKENDS.items():
+        if any(n in low for n in needles):
+            return name
+    return None
+
+
+def command_rom(cmd):
+    """The ROM in a launch command: the last argument that is a file on disk.
+    Only used for the per-game lookup, so guessing wrong costs nothing."""
+    for arg in reversed(cmd):
+        if not arg.startswith("-") and os.path.isfile(arg):
+            return arg
+    return None
+
+
 def find_app_id():
     if not shutil.which("flatpak"):
         return DEFAULT_APP_ID
@@ -1377,14 +1443,14 @@ def message_screen(ui, title, lines, color=BAD):
 
 # ------------------------------------------------------------------- launch
 
-def launch(app_id, rom, dry_run):
-    args = ["flatpak", "run", app_id, "-f"]
-    if rom:
-        args.append(rom)
+def launch(cmd, dry_run):
     if dry_run:
-        print("would exec:", " ".join(args))
+        print("would exec:", " ".join(cmd))
         return
-    os.execvp("flatpak", args)
+    # Replacing this process rather than spawning keeps the shell pipeline in
+    # preflight.sh alive for as long as the emulator is, which is how Steam
+    # knows the shortcut is still running.
+    os.execvp(cmd[0], cmd)
 
 
 def game_expectation(rom):
@@ -1401,16 +1467,28 @@ def game_expectation(rom):
 # --------------------------------------------------------------------- main
 
 def main():
-    args = [a for a in sys.argv[1:]]
-    if "--version" in args:
+    flags, positional, cmd = split_command(sys.argv[1:])
+    if "--version" in flags:
         print(f"preflight {VERSION}")
         return 0
-    dry_run = "--dry-run" in args
-    args = [a for a in args if not a.startswith("--")]
-    rom = args[0] if args else None
+    dry_run = "--dry-run" in flags
 
-    if rom and not os.path.exists(rom):
-        print(f"ROM not found: {rom}", file=sys.stderr)
+    if cmd:
+        # Told exactly what to run. The emulator comes out of the command.
+        target = command_target(cmd)
+        backend = backend_for(target)
+        rom = command_rom(cmd)
+    else:
+        # No command: the historical form, a bare ROM path, always Ryujinx.
+        rom = positional[0] if positional else None
+        if rom and not os.path.exists(rom):
+            print(f"ROM not found: {rom}", file=sys.stderr)
+        target = find_app_id()
+        backend = "ryujinx"
+        cmd = ["flatpak", "run", target, "-f"] + ([rom] if rom else [])
+
+    print(f"target: {target or 'unknown'}; backend: {backend or 'none'}",
+          flush=True)
 
     adopt_user_files()
     apply_theme()
@@ -1424,8 +1502,7 @@ def main():
     ui = UI(sdl, ttf)
     print(f"window ready: {ui.w}x{ui.h}", flush=True)
     known = load_json(KNOWN_PADS, {})
-    app_id = find_app_id()
-    cfg_path = find_config(app_id)
+    cfg_path = find_config(target) if backend == "ryujinx" else None
     needed = game_expectation(rom)
 
     slots = new_slot_state()
@@ -1473,7 +1550,11 @@ def main():
                 pads, unmapped = rescan()
 
             warnings = []
-            if not cfg_path:
+            if backend is None:
+                warnings.append(f"No controller-config backend for "
+                                f"{target or 'this command'} — the check runs, "
+                                f"but no bindings will be written.")
+            elif not cfg_path:
                 warnings.append("Ryujinx Config.json not found — cannot write.")
             if binding_gaps:
                 warnings.append(f"Ryujinx's saved controller settings are "
@@ -1608,6 +1689,9 @@ def main():
             return 1
 
         if state == "commit":
+            if backend is None:
+                remember(pads, known)   # identities are still worth keeping
+                break
             if not cfg_path:
                 result, state = ["Ryujinx Config.json not found."], "error"
                 continue
@@ -1633,7 +1717,7 @@ def main():
         p.close()
     ui.close()
     sdl.SDL_Quit()
-    launch(app_id, rom, dry_run)
+    launch(cmd, dry_run)
     return 0
 
 

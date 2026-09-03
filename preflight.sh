@@ -2,7 +2,11 @@
 # Steam shortcut target for preflight.
 #
 #   Target:         /home/deck/preflight/preflight.sh
-#   Launch Options: "/run/media/deck/mSD/ROMs/Switch/Your Game.nsp"
+#   Launch Options: -- flatpak run io.github.ryubing.Ryujinx -f "/roms/Game.nsp"
+#
+# Everything after "--" is the command to run once the check passes, and it is
+# what tells preflight which emulator it is configuring. A bare ROM path with
+# no "--" still works and assumes Ryujinx.
 #
 # Set that shortcut's controller layout to Steam Input ENABLED. That is the
 # configuration this has been proven on: every pad arrives as an identical
@@ -31,13 +35,20 @@ LOG="$STATE_DIR/launch.log"
 # that dies before Python gets going still records which build it was.
 VERSION="$(cat "$DIR/VERSION" 2>/dev/null || true)"
 
-ROM="${1:-}"
-case "$ROM" in --*) ROM="" ;; esac   # a flag is not a ROM
+# Log what we were asked to do. Note "$@" is never shifted — it has to reach
+# preflight.py exactly as Steam handed it over.
+if [ "${1:-}" = "--" ]; then
+    DESC="command: ${*:2}"
+else
+    ROM="${1:-}"
+    case "$ROM" in --*) ROM="" ;; esac   # a flag is not a ROM
+    DESC="rom: ${ROM:-<none, opening Ryujinx game list>}"
+fi
 
 {
     echo "=== $(date '+%Y-%m-%d %H:%M:%S') ==="
     echo "preflight ${VERSION:-unknown}"
-    echo "rom: ${ROM:-<none, opening Ryujinx game list>}"
+    echo "$DESC"
 } >>"$LOG"
 
 # Not exec'd: keeping this shell alive for the pipeline means Steam continues
