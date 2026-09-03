@@ -2,7 +2,7 @@
 
 # Preflight
 
-Check every controller works — *before* the game starts
+Check every controller works — *before* the game starts. Built as [SelfSteam](https://github.com/ScarletPachydermDev/SelfSteam) complement
 
 <img src=".github/screenshot.jpg" alt="Four controllers shown in colour-coded player bays, each with its buttons drawn live">
 
@@ -36,8 +36,7 @@ No more troubleshooting while three people wait. **No more you being Player 3.**
 Built for Steam Machine or Deck in a living room, aimed squarely at not making three
 people wait while you work out whose controller is which and inputs work.
 
-Currently supports Ryubing (Ryujinx) flatpak. Ryubing appimage, Dolphin and Eden are planned — most of
-the code has nothing to do with any particular emulator.
+**Currently supports only Ryubing (Ryujinx) flatpak.** Ryubing appimage, Dolphin and Eden are planned 
 
 ## Requirements
 
@@ -47,21 +46,6 @@ the code has nothing to do with any particular emulator.
 
 No Python packages to install. SteamOS has no `pip` and a read-only `/usr`, so
 Preflight talks to the libraries already on the system.
-
-## Setup
-
-Copy this folder to the machine/deck, then add a non-Steam shortcut per game:
-
-- **Target:** `/path/to/preflight/preflight.sh`
-- **Launch Options:** the ROM path, in quotes
-- **Controller layout:** Steam Input **enabled** — see below
-
-If your ROMs live outside your home folder, the emulator needs permission to
-read them:
-
-```bash
-flatpak override --user --filesystem=/path/to/roms:ro io.github.ryubing.Ryujinx
-```
 
 ### About Steam Input
 
@@ -82,21 +66,14 @@ Preflight wraps the command that would have started your game. Without it you
 would run something like:
 
 ```bash
-flatpak run io.github.ryubing.Ryujinx -f "/run/media/deck/mSD/ROMs/Switch/Mario Kart 8 Deluxe.nsp"
+flatpak run io.github.ryubing.Ryujinx -f "/run/media/deck/mSD/ROMs/Switch/game.nsp"
 ```
 
 With it, put `preflight.sh --` in front of exactly that:
 
 ```bash
-~/preflight/preflight.sh -- flatpak run io.github.ryubing.Ryujinx -f "/run/media/deck/mSD/ROMs/Switch/Mario Kart 8 Deluxe.nsp"
+~/preflight/preflight.sh -- flatpak run io.github.ryubing.Ryujinx -f "/run/media/deck/mSD/ROMs/Switch/game.nsp"
 ```
-
-Everything after `--` is left alone and run once the check passes. It is also
-how Preflight knows *which* emulator it is setting up, which matters as soon as
-you have more than one installed — `.nsp` alone cannot tell Ryujinx from Eden.
-
-In Steam the same thing splits across the two shortcut fields: the script goes
-in **Target**, and everything from `--` onwards goes in **Launch Options**.
 
 | Command | What it does |
 |:---|:---|
