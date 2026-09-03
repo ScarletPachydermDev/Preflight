@@ -788,22 +788,42 @@ def find_emulator_sdl(exe=None):
     and Ryujinx logs "No matching controllers found" while every pad works
     perfectly in this tool.
     """
+    for path in emulator_sdl_libs(exe):
+        if "libsdl2" in os.path.basename(path).lower():
+            return path
+    return None
+
+
+def emulator_sdl_libs(exe=None):
+    """Every SDL library shipped with the install we are about to launch.
+
+    Both majors, because which one is there is itself the answer to a
+    question: Ryubing stable bundles SDL2 2.30, but Canary has moved to
+    SDL3 (3.5.0 as of 1.3.351), and the two cannot be enumerated the same way.
+    """
     import glob
+    out = []
     if exe:
         # A tar.gz build — or an AppImage we have already extracted — keeps its
         # libraries beside the binary. Deliberately no falling back to the
         # flatpak's copy afterwards: borrowing one install's SDL to compute ids
         # for another is the exact mismatch this function exists to prevent.
         base = os.path.dirname(os.path.abspath(exe))
-        for pattern in ("libSDL2*.so*", "lib/libSDL2*.so*"):
-            hits = sorted(glob.glob(os.path.join(base, pattern)))
-            if hits:
-                return hits[0]
-        return None
+        for pattern in ("libSDL[23]*.so*", "lib/libSDL[23]*.so*"):
+            out.extend(sorted(glob.glob(os.path.join(base, pattern))))
+        return out
     for root in ("/var/lib/flatpak/app", os.path.expanduser("~/.local/share/flatpak/app")):
-        for path in glob.glob(f"{root}/*yu*/*/*/*/files/bin/libSDL2*.so*"):
-            return path
-    return None
+        out.extend(sorted(glob.glob(f"{root}/*yu*/*/*/*/files/bin/libSDL[23]*.so*")))
+    return out
+
+
+def emulator_sdl3_only(exe=None):
+    """True when the install ships SDL3 and no SDL2 — which we cannot yet
+    enumerate through, and must not silently paper over: ids computed with the
+    wrong SDL look perfectly valid and match nothing."""
+    names = [os.path.basename(p).lower() for p in emulator_sdl_libs(exe)]
+    return (any("libsdl3" in n for n in names)
+            and not any("libsdl2" in n for n in names))
 
 
 def emulator_gamepads(exe=None):
@@ -1144,9 +1164,14 @@ def write_config(cfg_path, pads, exe=None):
 
     rows = emulator_gamepads(exe)
     if rows is None:
-        problems_pre = ["Could not read the emulator's own SDL — ids may not "
-                        "match. Flatpak and tar builds are supported; an "
-                        "AppImage keeps its libraries inside the image."]
+        if emulator_sdl3_only(exe):
+            problems_pre = ["This build bundles SDL3, which Preflight cannot "
+                            "enumerate through yet — ids may not match. "
+                            "Ryubing Canary is SDL3; stable is still SDL2."]
+        else:
+            problems_pre = ["Could not read the emulator's own SDL — ids may "
+                            "not match. Flatpak and tar builds are supported; "
+                            "an AppImage keeps its libraries inside the image."]
     else:
         problems_pre = []
     entries, problems = build_entries(data.get("input_config") or [], pads, rows)

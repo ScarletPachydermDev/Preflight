@@ -148,11 +148,14 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - If a pad sleeps or wakes in the moment between saving and the emulator
   starting, its assignment can shift.
 - Preflight don't pair controllers. Pair them in your OS first.
-- **AppImage builds launch but get no bindings written.** Controller ids
-  have to be computed with the emulator's own copy of SDL, and an AppImage
-  keeps its libraries sealed inside the image. Flatpak and tar builds are
-  fine. Stable and Canary share `~/.config/Ryujinx`, so either one picks up
-  what the other was given.
+- **AppImage builds launch but get no bindings written.** Controller ids have
+  to be computed with the emulator's own copy of SDL, and an AppImage keeps its
+  libraries sealed inside the image.
+- **Ryubing Canary is not supported for bindings either.** It has moved to
+  SDL3, and Preflight can only enumerate through SDL2 so far; it says so on
+  screen rather than writing ids that would silently match nothing. Stable, as
+  a flatpak or an unpacked tar, is fine — and since both share
+  `~/.config/Ryujinx`, bindings written for stable are picked up by Canary.
 
 ## Troubleshooting
 

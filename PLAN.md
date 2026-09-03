@@ -233,10 +233,30 @@ and mtime and the cost is paid once per emulator update. `--appimage-mount` is
 tidier but wants FUSE. First, though, check whether Ryubing's AppImages bundle
 SDL at all or link the system one — if they link it, there is nothing to solve.
 
-**Canary needs no backend of its own.** It ships only as AppImage or tar, and
-on Linux it shares `~/.config/Ryujinx` with stable unless portable mode is on,
-so the same config writer covers both. The `ryujinx` needle in `BACKENDS`
-already matches a Canary AppImage filename.
+**Canary is NOT a free ride, corrected 2026-09-03 by downloading one.**
+Ryubing Canary 1.3.351 bundles **libSDL3.so, version 3.5.0** — in both the
+AppImage and the tar — while the flatpak stable build bundles SDL 2.30.0. The
+config *location* is shared (`~/.config/Ryujinx`, unless portable mode), and
+the `ryujinx` needle in `BACKENDS` matches its filename, so config writing is
+fine. What is not fine is §3: `EMU_ENUM` speaks the SDL2 C API, and ids
+computed with the wrong SDL look perfectly valid and match nothing.
+
+`emulator_sdl_libs()` therefore collects both majors, and `emulator_sdl3_only()`
+reports the case so the roster can say exactly that rather than shrugging. What
+an SDL3 backend needs, when someone gets to it: an SDL3 flavour of `EMU_ENUM`
+(`SDL_GetJoysticks` returns an array rather than a count, and the getters are
+renamed), and a phase0 pass to find out whether Ryujinx-on-SDL3 still derives
+its config id the same way — SDL3 keeps the 16-byte GUID layout, but the bus
+byte is the exact thing that bit us once already, so assume nothing.
+
+**AppImage payload formats differ by emulator, which the extraction plan has
+to survive.** Measured: Ryubing Canary's AppImage is classic squashfs (`hsqs`
+at the offset from `--appimage-offset`, 31 entries, SDL under `usr/lib/`), so
+`unsquashfs -o <offset> -d <dest> <image> 'usr/lib/libSDL*'` pulls the library
+out with no FUSE involved. Eden's AppImage is **DwarFS**, where unsquashfs is
+useless and `--appimage-mount` is the way in — that works and needs no root.
+On both, `--appimage-extract` with a pattern exited 0 and produced no files,
+which is a nasty way to fail: check for output, never for the exit code.
 
 **What will differ, and what to expect:**
 
