@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Bump VERSION's patch number on every commit, so the number in launch.log
+# always identifies exactly which build produced a run.
+#
+# Enable in a fresh clone with:
+#     git config core.hooksPath hooks
+#
+# A VERSION already staged by hand is left alone, so a deliberate 0.2.0 ->
+# 0.3.0 survives. Skip a bump entirely with: git commit --no-verify
+
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+FILE="$ROOT/VERSION"
+[ -f "$FILE" ] || exit 0
+
+# Staged by hand? Then the author has already said what the version is.
+if ! git diff --cached --quiet -- "$FILE"; then
+    exit 0
+fi
+
+CUR="$(tr -d '[:space:]' < "$FILE")"
+if [[ ! "$CUR" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    echo "pre-commit: VERSION is '$CUR', not x.y.z — leaving it alone" >&2
+    exit 0
+fi
+
+NEW="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$(( BASH_REMATCH[3] + 1 ))"
+printf '%s\n' "$NEW" > "$FILE"
+git add -- "$FILE"
+echo "pre-commit: version $CUR -> $NEW"
