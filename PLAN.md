@@ -226,12 +226,22 @@ looks beside the binary, so **tar builds work**, and it deliberately does not
 fall back to the flatpak's library: mixing one install's SDL with another's is
 the mismatch the function exists to prevent.
 
-What remains is **AppImage**, and it is only §3's problem: the bundled
-`libSDL2.so` sits inside a squashfs image. `--appimage-extract 'usr/lib/libSDL2*'`
-pulls just that file out; cache it under `STATE_DIR` keyed by the image's size
-and mtime and the cost is paid once per emulator update. `--appimage-mount` is
-tidier but wants FUSE. First, though, check whether Ryubing's AppImages bundle
-SDL at all or link the system one — if they link it, there is nothing to solve.
+**AppImage works too, as of 2026-09-03.** `appimage_sdl_dir()` asks the image
+for its payload offset (`--appimage-offset`), runs `unsquashfs` at that offset
+for `usr/lib/libSDL*`, and caches the result under
+`STATE_DIR/sdl-cache/<basename>-<size>-<mtime>/`. No FUSE, no mounting, no
+root; the cost is paid once per emulator update and a hit is instant. Measured
+on a Canary AppImage: 2.8 MB cached, one `libSDL3.so`.
+
+Two traps, both of which cost time here:
+
+- `--appimage-extract` with a pattern **exits 0 and writes nothing**. Check for
+  output files, never the exit code. `unsquashfs -o <offset>` is the reliable
+  route for a squashfs payload.
+- The dead-entry prune ran *before* the rename, and `<basename>-*` matches the
+  temporary directory as well, so it deleted what it had just extracted and the
+  whole thing failed silently. Prune after the rename, and skip the entry just
+  written.
 
 **Canary is NOT a free ride, corrected 2026-09-03 by downloading one.**
 Ryubing Canary 1.3.351 bundles **libSDL3.so, version 3.5.0** — in both the

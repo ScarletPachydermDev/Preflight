@@ -36,14 +36,13 @@ No more troubleshooting while three people wait. **No more you being Player 3.**
 Built for Steam Machine or Deck in a living room, aimed squarely at not making three
 people wait while you work out whose controller is which and inputs work.
 
-**Currently supports only Ryubing (Ryujinx) flatpak and tar builds.** Ryubing appimage, Dolphin and Eden are planned 
+**Currently supports only Ryubing (Ryujinx): flatpak, AppImage or tar.** Dolphin and Eden are planned 
 
 ## Requirements
 
 - SteamOS or a Linux system with Steam
-- Ryubing (Ryujinx) installed as a Flatpak or unpacked from a tar build.
-  An AppImage launches fine, but its bindings cannot be written yet — see
-  Limitations
+- Ryubing (Ryujinx) as a Flatpak, an AppImage, or an unpacked tar build
+  (`unsquashfs` is needed for AppImages, and ships with SteamOS)
 - SDL2 and SDL2_ttf — already present on SteamOS
 
 No Python packages to install. SteamOS has no `pip` and a read-only `/usr`, so
@@ -148,9 +147,6 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - If a pad sleeps or wakes in the moment between saving and the emulator
   starting, its assignment can shift.
 - Preflight don't pair controllers. Pair them in your OS first.
-- **AppImage builds launch but get no bindings written.** Controller ids have
-  to be computed with the emulator's own copy of SDL, and an AppImage keeps its
-  libraries sealed inside the image.
 - Stable and Canary share `~/.config/Ryujinx`, so bindings written for one are
   picked up by the other. Canary bundles SDL3 and stable SDL2; Preflight reads
   either.

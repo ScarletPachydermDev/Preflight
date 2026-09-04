@@ -806,6 +806,75 @@ def find_emulator_sdl3(exe=None):
     return None
 
 
+def appimage_sdl_dir(exe):
+    """Extract an AppImage's SDL library and return the directory holding it.
+
+    An AppImage is an ELF header followed by a filesystem image, so the library
+    cannot simply be read off disk. Ryubing's is plain squashfs, which
+    unsquashfs opens at the offset the runtime reports — no FUSE, no mounting,
+    no root. The result is cached under STATE_DIR against the image's size and
+    mtime, so the cost is paid once per emulator update.
+
+    Note --appimage-extract is NOT used: with a pattern it exits 0 and writes
+    nothing at all, which is a poor way to find out something went wrong.
+    """
+    if not exe or not exe.lower().endswith(".appimage") or not os.path.isfile(exe):
+        return None
+    try:
+        st = os.stat(exe)
+    except OSError:
+        return None
+
+    key = f"{os.path.basename(exe)}-{st.st_size}-{int(st.st_mtime)}"
+    cache = os.path.join(STATE_DIR, "sdl-cache", key)
+    if os.path.isdir(cache):
+        return cache
+    if not shutil.which("unsquashfs"):
+        return None
+
+    try:
+        off = subprocess.run([exe, "--appimage-offset"], capture_output=True,
+                             text=True, timeout=20)
+        offset = int(off.stdout.strip())
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None
+
+    tmp = cache + ".tmp"
+    try:
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+    except OSError:
+        return None
+    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        subprocess.run(["unsquashfs", "-o", str(offset), "-d", tmp, "-no-progress",
+                        exe, "usr/lib/libSDL*"],
+                       capture_output=True, text=True, timeout=120)
+    except (subprocess.SubprocessError, OSError):
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+
+    import glob
+    if not glob.glob(os.path.join(tmp, "usr", "lib", "libSDL*")):
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+
+    try:
+        os.replace(tmp, cache)
+    except OSError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+
+    # One cache entry per image; older versions of the same file are dead
+    # weight the moment the emulator updates. Pruning happens after the
+    # rename, and skips the entry just written — the pattern matches it too.
+    for stale in glob.glob(os.path.join(os.path.dirname(cache),
+                                        os.path.basename(exe) + "-*")):
+        if os.path.abspath(stale) != os.path.abspath(cache):
+            shutil.rmtree(stale, ignore_errors=True)
+    print(f"extracted SDL from {os.path.basename(exe)}", flush=True)
+    return cache
+
+
 def emulator_sdl_libs(exe=None):
     """Every SDL library shipped with the install we are about to launch.
 
@@ -816,12 +885,14 @@ def emulator_sdl_libs(exe=None):
     import glob
     out = []
     if exe:
-        # A tar.gz build — or an AppImage we have already extracted — keeps its
-        # libraries beside the binary. Deliberately no falling back to the
-        # flatpak's copy afterwards: borrowing one install's SDL to compute ids
-        # for another is the exact mismatch this function exists to prevent.
-        base = os.path.dirname(os.path.abspath(exe))
-        for pattern in ("libSDL[23]*.so*", "lib/libSDL[23]*.so*"):
+        # A tar.gz build keeps its libraries beside the binary; an AppImage
+        # keeps them sealed inside, so we look in the extracted copy instead.
+        # Deliberately no falling back to the flatpak's library afterwards:
+        # borrowing one install's SDL to compute ids for another is the exact
+        # mismatch this function exists to prevent.
+        base = appimage_sdl_dir(exe) or os.path.dirname(os.path.abspath(exe))
+        for pattern in ("libSDL[23]*.so*", "lib/libSDL[23]*.so*",
+                        "usr/lib/libSDL[23]*.so*"):
             out.extend(sorted(glob.glob(os.path.join(base, pattern))))
         return out
     for root in ("/var/lib/flatpak/app", os.path.expanduser("~/.local/share/flatpak/app")):
