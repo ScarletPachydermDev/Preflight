@@ -764,6 +764,10 @@ class G(ctypes.Structure):
     _fields_ = [("d", ctypes.c_uint8 * 16)]
 for h in (b"SDL_JOYSTICK_HIDAPI_STEAM", b"SDL_JOYSTICK_HIDAPI_STEAMDECK"):
     sdl.SDL_SetHint(h, b"0")
+# SDL 2.32 and SDL3 hide Steam's virtual pads from anything not launched by
+# Steam; SDL 2.30 shows them to everyone. Without this the enumeration is
+# empty exactly when Steam Input is on, which is the configuration we run.
+sdl.SDL_SetHint(b"SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", b"1")
 sdl.SDL_Init(0x00000200 | 0x00002000)
 sdl.SDL_JoystickGetDeviceGUID.restype = G
 sdl.SDL_JoystickGetDeviceGUID.argtypes = [ctypes.c_int]
@@ -841,6 +845,10 @@ class G(ctypes.Structure):
     _fields_ = [("d", ctypes.c_uint8 * 16)]
 for h in (b"SDL_JOYSTICK_HIDAPI_STEAM", b"SDL_JOYSTICK_HIDAPI_STEAMDECK"):
     sdl.SDL_SetHint(h, b"0")
+# SDL 2.32 and SDL3 hide Steam's virtual pads from anything not launched by
+# Steam; SDL 2.30 shows them to everyone. Without this the enumeration is
+# empty exactly when Steam Input is on, which is the configuration we run.
+sdl.SDL_SetHint(b"SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", b"1")
 sdl.SDL_Init(0x00000200 | 0x00002000)
 sdl.SDL_GetJoysticks.restype = ctypes.POINTER(ctypes.c_uint32)
 sdl.SDL_GetJoysticks.argtypes = [ctypes.POINTER(ctypes.c_int)]
@@ -880,8 +888,12 @@ def emulator_gamepads(exe=None):
         lib, src = find_emulator_sdl3(exe), EMU_ENUM3
     if not lib:
         return None
+    # Set in the environment, not only via SDL_SetHint: SDL3 reads this one
+    # straight from the environment before the hint system is consulted, so a
+    # SDL_SetHint call inside the script is ignored there.
+    env = dict(os.environ, SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD="1")
     try:
-        out = subprocess.run([sys.executable, "-c", src, lib],
+        out = subprocess.run([sys.executable, "-c", src, lib], env=env,
                              capture_output=True, text=True, timeout=20)
     except (subprocess.SubprocessError, OSError):
         return None

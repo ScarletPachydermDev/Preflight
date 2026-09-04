@@ -248,13 +248,31 @@ stands in for SDL2's device index, and the getters are renamed
 (`SDL_GetJoystickGUIDForID`, `SDL_GetJoystickNameForID`, `SDL_GUIDToString`).
 `emulator_gamepads()` tries SDL2 first and falls back to SDL3.
 
-Verified against a real SDL 3.x: every symbol resolves, the script runs clean,
-and passing the 16-byte GUID struct by value produces byte-identical output
-from `SDL_GUIDToString` and SDL2's `SDL_JoystickGetGUIDString`. **Not yet
-verified against Canary's own copy with real pads attached** — do that before
-trusting it, and in particular find out whether Ryujinx-on-SDL3 still derives
-its config id the same way. SDL3 keeps the 16-byte GUID layout, but the bus
-byte is the exact thing that bit us once already, so assume nothing.
+**Verified on the Steam Machine with a real pad, 2026-09-03.** The same
+controller enumerated through Ryujinx's SDL 2.30, SteamOS's SDL 2.32 and
+Canary's SDL 3.5.0 gives a byte-identical GUID:
+
+```
+030079f6de280000ff11000001000000
+```
+
+So SDL3 needs no id conversion of its own. The *name* does differ — 2.30 says
+"Steam Virtual Gamepad", the newer two report the kernel name "Microsoft X-Box
+360 pad 0" — but the CRC field inside the GUID stayed the same, and Ryujinx
+zeroes it anyway.
+
+THIRD load-bearing discovery, found while testing that: **SDL 2.32 and SDL3
+hide Steam's virtual pads from any process Steam did not launch, and SDL 2.30
+does not.** With Steam Input on, the virtual pads are the only pads there are,
+so enumeration came back completely empty — silently, exit code 0. The unlock
+is `SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1`, and it has to be set in
+the subprocess **environment**: SDL3 reads it directly from the environment
+before the hint system is consulted, so calling `SDL_SetHint` inside the script
+works for SDL2 and is ignored by SDL3. Both are set now, belt and braces.
+
+This never bit us in normal use because preflight runs under Steam and inherits
+the environment that makes SDL trust it. It would have bitten the moment anyone
+ran the tool outside Steam against a modern SDL.
 
 **AppImage payload formats differ by emulator, which the extraction plan has
 to survive.** Measured: Ryubing Canary's AppImage is classic squashfs (`hsqs`
