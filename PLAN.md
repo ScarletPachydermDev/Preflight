@@ -330,7 +330,11 @@ The boundary is the API and should not shift casually:
   is the form SelfSteam should generate, or a bare ROM path for the Ryujinx
   shorthand. Everything else inside this project can be rewritten freely.
 - **`VERSION`** is a plain version string, so SelfSteam can report which build
-  it shipped — it is written into every `launch.log` run header.
+  it shipped — it is written into every `launch.log` run header. The patch
+  number is bumped automatically by `hooks/pre-commit`, so the number in a log
+  identifies the exact commit; enable it in a clone with
+  `git config core.hooksPath hooks`. Staging `VERSION` by hand suppresses the
+  bump, which is how a deliberate minor or major version is set.
 - **State and config live outside the install directory**, so SelfSteam never
   has to ship or preserve them. `known_pads.json` accumulates controller MAC
   addresses and must stay out of the repository either way.
