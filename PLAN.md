@@ -241,12 +241,19 @@ the `ryujinx` needle in `BACKENDS` matches its filename, so config writing is
 fine. What is not fine is §3: `EMU_ENUM` speaks the SDL2 C API, and ids
 computed with the wrong SDL look perfectly valid and match nothing.
 
-`emulator_sdl_libs()` therefore collects both majors, and `emulator_sdl3_only()`
-reports the case so the roster can say exactly that rather than shrugging. What
-an SDL3 backend needs, when someone gets to it: an SDL3 flavour of `EMU_ENUM`
-(`SDL_GetJoysticks` returns an array rather than a count, and the getters are
-renamed), and a phase0 pass to find out whether Ryujinx-on-SDL3 still derives
-its config id the same way — SDL3 keeps the 16-byte GUID layout, but the bus
+`emulator_sdl_libs()` therefore collects both majors, and `EMU_ENUM3` is the
+SDL3 flavour of the enumeration subprocess: `SDL_GetJoysticks` returns a
+malloc'd array of instance ids instead of a count, so the array's own order
+stands in for SDL2's device index, and the getters are renamed
+(`SDL_GetJoystickGUIDForID`, `SDL_GetJoystickNameForID`, `SDL_GUIDToString`).
+`emulator_gamepads()` tries SDL2 first and falls back to SDL3.
+
+Verified against a real SDL 3.x: every symbol resolves, the script runs clean,
+and passing the 16-byte GUID struct by value produces byte-identical output
+from `SDL_GUIDToString` and SDL2's `SDL_JoystickGetGUIDString`. **Not yet
+verified against Canary's own copy with real pads attached** — do that before
+trusting it, and in particular find out whether Ryujinx-on-SDL3 still derives
+its config id the same way. SDL3 keeps the 16-byte GUID layout, but the bus
 byte is the exact thing that bit us once already, so assume nothing.
 
 **AppImage payload formats differ by emulator, which the extraction plan has

@@ -794,6 +794,14 @@ def find_emulator_sdl(exe=None):
     return None
 
 
+def find_emulator_sdl3(exe=None):
+    """Same idea as find_emulator_sdl, for builds that ship SDL3 instead."""
+    for path in emulator_sdl_libs(exe):
+        if "libsdl3" in os.path.basename(path).lower():
+            return path
+    return None
+
+
 def emulator_sdl_libs(exe=None):
     """Every SDL library shipped with the install we are about to launch.
 
@@ -818,12 +826,43 @@ def emulator_sdl_libs(exe=None):
 
 
 def emulator_sdl3_only(exe=None):
-    """True when the install ships SDL3 and no SDL2 — which we cannot yet
-    enumerate through, and must not silently paper over: ids computed with the
-    wrong SDL look perfectly valid and match nothing."""
+    """True when the install ships SDL3 and no SDL2. Both are enumerated now;
+    this is kept because which major an install ships is the first thing worth
+    knowing when its ids come out wrong."""
     names = [os.path.basename(p).lower() for p in emulator_sdl_libs(exe)]
     return (any("libsdl3" in n for n in names)
             and not any("libsdl2" in n for n in names))
+
+
+EMU_ENUM3 = r"""
+import ctypes, sys
+sdl = ctypes.CDLL(sys.argv[1])
+class G(ctypes.Structure):
+    _fields_ = [("d", ctypes.c_uint8 * 16)]
+for h in (b"SDL_JOYSTICK_HIDAPI_STEAM", b"SDL_JOYSTICK_HIDAPI_STEAMDECK"):
+    sdl.SDL_SetHint(h, b"0")
+sdl.SDL_Init(0x00000200 | 0x00002000)
+sdl.SDL_GetJoysticks.restype = ctypes.POINTER(ctypes.c_uint32)
+sdl.SDL_GetJoysticks.argtypes = [ctypes.POINTER(ctypes.c_int)]
+sdl.SDL_GetJoystickGUIDForID.restype = G
+sdl.SDL_GetJoystickGUIDForID.argtypes = [ctypes.c_uint32]
+sdl.SDL_GUIDToString.argtypes = [G, ctypes.c_char_p, ctypes.c_int]
+sdl.SDL_GetJoystickNameForID.restype = ctypes.c_char_p
+sdl.SDL_GetJoystickNameForID.argtypes = [ctypes.c_uint32]
+sdl.SDL_free.argtypes = [ctypes.c_void_p]
+count = ctypes.c_int(0)
+ids = sdl.SDL_GetJoysticks(ctypes.byref(count))
+# SDL3 dropped device indices; the array's own order is the enumeration order,
+# which is the closest thing to SDL2's device index.
+for i in range(count.value if ids else 0):
+    b = ctypes.create_string_buffer(33)
+    sdl.SDL_GUIDToString(sdl.SDL_GetJoystickGUIDForID(ids[i]), b, 33)
+    n = sdl.SDL_GetJoystickNameForID(ids[i])
+    print(i, b.value.decode(), (n or b"?").decode(errors="replace"), sep="\t")
+if ids:
+    sdl.SDL_free(ids)
+sdl.SDL_Quit()
+"""
 
 
 def emulator_gamepads(exe=None):
@@ -833,11 +872,16 @@ def emulator_gamepads(exe=None):
     loading both in one process gets us whichever landed first — the UI keeps
     the system SDL, this borrows the emulator's.
     """
-    lib = find_emulator_sdl(exe)
+    lib, src = find_emulator_sdl(exe), EMU_ENUM
+    if not lib:
+        # Ryubing Canary moved to SDL3, which is a different C API: no device
+        # indices, joystick ids come back as an array, and the getters are
+        # renamed. Same GUIDs out the other end.
+        lib, src = find_emulator_sdl3(exe), EMU_ENUM3
     if not lib:
         return None
     try:
-        out = subprocess.run([sys.executable, "-c", EMU_ENUM, lib],
+        out = subprocess.run([sys.executable, "-c", src, lib],
                              capture_output=True, text=True, timeout=20)
     except (subprocess.SubprocessError, OSError):
         return None
@@ -1164,14 +1208,10 @@ def write_config(cfg_path, pads, exe=None):
 
     rows = emulator_gamepads(exe)
     if rows is None:
-        if emulator_sdl3_only(exe):
-            problems_pre = ["This build bundles SDL3, which Preflight cannot "
-                            "enumerate through yet — ids may not match. "
-                            "Ryubing Canary is SDL3; stable is still SDL2."]
-        else:
-            problems_pre = ["Could not read the emulator's own SDL — ids may "
-                            "not match. Flatpak and tar builds are supported; "
-                            "an AppImage keeps its libraries inside the image."]
+        problems_pre = ["Could not read the emulator's own SDL — ids may not "
+                        "match. Flatpak and tar builds are supported, SDL2 or "
+                        "SDL3; an AppImage keeps its libraries inside the "
+                        "image."]
     else:
         problems_pre = []
     entries, problems = build_entries(data.get("input_config") or [], pads, rows)
