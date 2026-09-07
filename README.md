@@ -163,8 +163,10 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - If a pad sleeps or wakes in the moment between saving and the emulator
   starting, its assignment can shift.
 - Preflight don't pair controllers. Pair them in your OS first.
-- Dolphin pads are written as evdev devices, so a controller must be awake
-  during the check for Dolphin to be given anything usable.
+- On Dolphin a pad is bound by its kernel device name, so Preflight has to be
+  able to read that pad's node. A controller SDL can see does not always have
+  one: Steam takes the 2026 Steam Controller over at hidraw level and publishes
+  only a virtual pad, which leaves Dolphin nothing to bind to.
 
 ## Troubleshooting
 
