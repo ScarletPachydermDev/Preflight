@@ -1474,40 +1474,53 @@ def write_dolphin_config(cfg_dir, pads):
         shutil.copy2(gc_path, os.path.join(BACKUP_DIR, f"GCPadNew.{stamp}.ini"))
     write_ini(gc_path, out)
 
-    problems = enable_dolphin_ports(cfg_dir, [p.slot for p in assigned], stamp)
+    problems = update_dolphin_ini(cfg_dir, [p.slot for p in assigned], stamp)
     return problems
 
 
-def enable_dolphin_ports(cfg_dir, slots, stamp):
-    """SIDevice<n> = 6 is 'a standard controller is plugged into this port'.
-    Without it the mappings exist and the port stays empty, which looks
-    exactly like the bindings not having been written at all."""
+def update_dolphin_ini(cfg_dir, slots, stamp):
+    """Two fixups in Dolphin.ini, both of which are invisible when missing.
+
+    SIDevice<n> = 6 says 'a standard controller is plugged into this port';
+    without it the mappings exist and the port stays empty.
+
+    The SDL hint is subtler. Dolphin's SDL is 2.32, which hides Steam's
+    virtual gamepads from any process Steam did not launch — and Dolphin runs
+    inside a flatpak, so Steam's environment never reaches it. Under Steam
+    Input the virtual pads are the only pads there are, so Dolphin sees
+    nothing at all and the game has no controller. Dolphin applies whatever
+    is in [SDL_Hints] at startup, which is the way in.
+    """
     path = os.path.join(cfg_dir, "Dolphin.ini")
     sections = read_ini(path) if os.path.isfile(path) else []
     if sections is None:
         return ["cannot read Dolphin.ini"]
 
-    wanted = {f"SIDevice{s - 1}": "6" for s in slots}
-    core = None
-    for name, rows in sections:
-        if name == "Core":
-            core = rows
-            break
-    if core is None:
-        core = []
-        sections.append(("Core", core))
+    wanted = {
+        "Core": {f"SIDevice{s - 1}": "6" for s in slots},
+        "SDL_Hints": {"SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD": "1"},
+    }
 
     changed = False
-    for key, value in wanted.items():
-        for i, (k, v) in enumerate(core):
-            if k == key:
-                if v != value:
-                    core[i] = (k, value)
-                    changed = True
+    for section, values in wanted.items():
+        rows = None
+        for name, r in sections:
+            if name == section:
+                rows = r
                 break
-        else:
-            core.append((key, value))
-            changed = True
+        if rows is None:
+            rows = []
+            sections.append((section, rows))
+        for key, value in values.items():
+            for i, (k, v) in enumerate(rows):
+                if k == key:
+                    if v != value:
+                        rows[i] = (k, value)
+                        changed = True
+                    break
+            else:
+                rows.append((key, value))
+                changed = True
 
     if changed:
         if os.path.isfile(path):
