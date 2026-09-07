@@ -540,7 +540,21 @@ class RealWatcher:
         self.available = False
 
     def open(self):
+        return self.refresh()
+
+    def refresh(self):
+        """Re-check which real nodes exist and open any new ones.
+
+        Sampling once at startup was wrong: the tool deliberately does not
+        wake controllers, so a pad's evdev node usually appears *after* we are
+        already running. Missing it means the pad never pairs to its hardware,
+        which shows up as a generic "Steam pad 36b8" label and a per-pad swap
+        that cannot be remembered.
+        """
+        known = {info["path"] for info in self.fds.values()}
         for info in scan_real_gamepads():
+            if info["path"] in known:
+                continue
             try:
                 self.fds[os.open(info["path"], os.O_RDONLY | os.O_NONBLOCK)] = info
             except OSError:
@@ -1399,7 +1413,7 @@ DOLPHIN_GC_EVDEV_TEMPLATE = [
     ("Triggers/R", "`Full Axis 5+`"),
     ("Triggers/L-Analog", "`Full Axis 2+`"),
     ("Triggers/R-Analog", "`Full Axis 5+`"),
-    ("Rumble/Motor", "`Strong Rumble`"),
+    ("Rumble/Motor", "Strong"),
     ("Options/Always Connected", "True"),
 ]
 
@@ -2111,14 +2125,15 @@ def main():
     cycle = RumbleCycle(sdl)
     reals = RealWatcher()
     if not reals.open():
-        print("note: cannot read /dev/input directly; virtual pads will not "
-              "be matched to their hardware", flush=True)
+        print("note: no physical pads visible yet; will look again as pads "
+              "wake", flush=True)
     HOLD_MS = 1100
     holding = {}            # (pad key, button) -> tick the hold began
     combo_armed = set()     # pads whose L+R has already fired this press
 
     def rescan():
         """Rebuild the pad list, preserving what each pad was doing."""
+        reals.refresh()          # a pad that just woke has a new evdev node
         was = {p.key: (p.held, p.axes) for p in pads}
         for p in pads:
             p.close()
