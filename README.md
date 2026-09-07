@@ -36,15 +36,29 @@ No more troubleshooting while three people wait. **No more you being Player 3.**
 Built for Steam Machine or Deck in a living room, aimed squarely at not making three
 people wait while you work out whose controller is which and inputs work.
 
-**Supports Ryubing (Ryujinx) — flatpak, AppImage or tar — and Dolphin GameCube pads.** Dolphin's Wii remotes and Eden are planned 
+## Supported emulators
+
+| Emulator | Builds | What Preflight writes |
+|:---|:---|:---|
+| **Ryubing (Ryujinx)** | flatpak, AppImage, tar | all four players' bindings, as Pro Controllers |
+| **Dolphin** | flatpak | GameCube pads 1–4, and the ports they plug into |
+
+Ryubing **Canary** works as well as stable — it ships SDL3 where stable ships
+SDL2, and Preflight reads either. Both share `~/.config/Ryujinx` unless you use
+portable mode, so bindings written for one are picked up by the other.
+
+Dolphin's **Wii remotes** are left alone, and **Eden** is not supported yet.
+
+Point Preflight at an emulator it does not know and it still runs the check and
+still launches the game — it just says on screen that no bindings were written.
+So it is useful in front of anything, and only writes config for the two above.
 
 ## Requirements
 
 - SteamOS or a Linux system with Steam
-- Ryubing (Ryujinx) as a Flatpak, an AppImage, or an unpacked tar build
-  (`unsquashfs` is needed for AppImages, and ships with SteamOS), or
-  Dolphin for GameCube games
+- One of the emulators above
 - SDL2 and SDL2_ttf — already present on SteamOS
+- `unsquashfs` for AppImage builds — already present on SteamOS
 
 No Python packages to install. SteamOS has no `pip` and a read-only `/usr`, so
 Preflight talks to the libraries already on the system.
@@ -149,9 +163,8 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - If a pad sleeps or wakes in the moment between saving and the emulator
   starting, its assignment can shift.
 - Preflight don't pair controllers. Pair them in your OS first.
-- Stable and Canary share `~/.config/Ryujinx`, so bindings written for one are
-  picked up by the other. Canary bundles SDL3 and stable SDL2; Preflight reads
-  either.
+- Dolphin pads are written as evdev devices, so a controller must be awake
+  during the check for Dolphin to be given anything usable.
 
 ## Troubleshooting
 
