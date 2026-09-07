@@ -325,11 +325,22 @@ which is a nasty way to fail: check for output, never for the exit code.
   each pad to its physical hardware by MAC does not work either, because
   `RealWatcher` cannot open `/dev/input` under Steam here, so no pad ever
   learns its MAC (`note: cannot read /dev/input directly` in launch.log).
-  What does work is `prepare_command()` adding
-  `--env=SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1` to the `flatpak
-  run` line, verified to arrive inside the sandbox. The MAC path is still
-  preferred when a MAC happens to be known, since a physical device needs no
-  hint at all. Wii remotes are untouched: `WiimoteNew.ini` defaults
+  `prepare_command()` adds `--env=SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1`
+  to the `flatpak run` line, which does get the devices in front of Dolphin —
+  `/proc/<pid>/fd` confirms it opens event20/22/24 — but the game still had no
+  input, because **SDL's name for a virtual pad is not the kernel's**. SDL
+  calls all of them "Steam Virtual Gamepad"; the kernel calls them "Microsoft
+  X-Box 360 pad 0/1/2". Dolphin's SDL backend uses one of the two and there is
+  no way to tell which from outside.
+
+  **So the backend writes `evdev/<n>/<kernel name>` instead**, which has none
+  of these problems: kernel names are unique per pad, no hint is needed, and
+  no visibility rule applies. The vocabulary is completely different from the
+  SDL backend's — bare `SOUTH`/`EAST`, `Axis 7-` for the d-pad, `Full Axis 2+`
+  for triggers, axis numbers being positions among the device's absolute axes
+  rather than kernel codes — and it was copied in shape from a working
+  hand-made entry, then checked against the device's own reported
+  capabilities. Do not "simplify" this back to SDL device strings. Wii remotes are untouched: `WiimoteNew.ini` defaults
   to `XInput2/0/Virtual core pointer` and is a separate problem.
 - **Eden** is a Yuzu continuation and inherits Yuzu's INI config, where each
   binding is an engine/guid/port string rather than a single device id.

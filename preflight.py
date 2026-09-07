@@ -403,6 +403,7 @@ class Pad:
         if hasattr(sdl, "SDL_JoystickPathForIndex"):
             p = sdl.SDL_JoystickPathForIndex(index)
             devpath = p.decode(errors="replace") if p else None
+        self.devpath = devpath
         self.mac = self.serial or sysfs_uniq(devpath)
         if self.battery == "?":
             self.battery = sysfs_battery(self.mac)   # None when truly unknown
@@ -1368,6 +1369,65 @@ DOLPHIN_GC_TEMPLATE = [
 DOLPHIN_FACE_IDENTITY = {"a": "S", "b": "E", "x": "W", "y": "N"}
 DOLPHIN_FACE_MIRRORED = {"a": "E", "b": "S", "x": "N", "y": "W"}
 
+# The same pad through Dolphin's evdev backend, which is what we actually
+# write. Its vocabulary is entirely different from the SDL backend's, and the
+# axis numbers are positions among the device's absolute axes rather than
+# kernel codes — hence the d-pad on 6 and 7. Copied verbatim in shape from a
+# working hand-made entry rather than derived, and confirmed against the
+# device's own capabilities: SOUTH EAST NORTH WEST TL TR SELECT START MODE
+# THUMBL THUMBR, axes X Y Z RX RY RZ HAT0X HAT0Y.
+DOLPHIN_GC_EVDEV_TEMPLATE = [
+    ("Buttons/A", "{A}"),
+    ("Buttons/B", "{B}"),
+    ("Buttons/X", "{X}"),
+    ("Buttons/Y", "{Y}"),
+    ("Buttons/Z", "TR"),
+    ("Buttons/Start", "START"),
+    ("D-Pad/Up", "`Axis 7-`"),
+    ("D-Pad/Down", "`Axis 7+`"),
+    ("D-Pad/Left", "`Axis 6-`"),
+    ("D-Pad/Right", "`Axis 6+`"),
+    ("Main Stick/Up", "`Axis 1-`"),
+    ("Main Stick/Down", "`Axis 1+`"),
+    ("Main Stick/Left", "`Axis 0-`"),
+    ("Main Stick/Right", "`Axis 0+`"),
+    ("C-Stick/Up", "`Axis 4-`"),
+    ("C-Stick/Down", "`Axis 4+`"),
+    ("C-Stick/Left", "`Axis 3-`"),
+    ("C-Stick/Right", "`Axis 3+`"),
+    ("Triggers/L", "`Full Axis 2+`"),
+    ("Triggers/R", "`Full Axis 5+`"),
+    ("Triggers/L-Analog", "`Full Axis 2+`"),
+    ("Triggers/R-Analog", "`Full Axis 5+`"),
+    ("Rumble/Motor", "`Strong Rumble`"),
+    ("Options/Always Connected", "True"),
+]
+
+DOLPHIN_EVDEV_IDENTITY = {"A": "SOUTH", "B": "EAST", "X": "WEST", "Y": "NORTH"}
+DOLPHIN_EVDEV_MIRRORED = {"A": "EAST", "B": "SOUTH", "X": "NORTH", "Y": "WEST"}
+
+
+def kernel_name(pad):
+    """The name the kernel gives this pad, which is what Dolphin's evdev
+    backend calls it. SDL's name is not it: SDL says "Steam Virtual Gamepad"
+    where the kernel says "Microsoft X-Box 360 pad 0"."""
+    import glob as _g
+    path = getattr(pad, "devpath", None) or ""
+    nodes = []
+    if path.startswith("/dev/input/event"):
+        nodes = [f"/sys/class/input/{os.path.basename(path)}/device/name"]
+    elif path.startswith("/dev/hidraw"):
+        nodes = _g.glob(
+            f"/sys/class/hidraw/{os.path.basename(path)}/device/input/input*/name")
+    for node in nodes:
+        try:
+            got = open(node).read().strip()
+        except OSError:
+            continue
+        if got:
+            return got
+    return pad.name
+
 
 # Enumerate the way Dolphin does: its own SDL, Steam's ignore list cleared
 # (that variable is set for processes Steam launches, and does not cross the
@@ -1475,35 +1535,22 @@ def find_dolphin_config(app_id=None, exe=None):
 
 
 def dolphin_device_names(pads, rows=None):
-    """`SDL/<n>/<name>` per pad, as Dolphin will address it.
+    """`evdev/<n>/<kernel name>` per pad.
 
-    Preferably the PHYSICAL pad. Under Steam Input preflight only ever sees
-    Steam's virtual pads, but Dolphin runs in a flatpak where Steam's ignore
-    list does not reach, so it sees the real hardware over hidraw — and sees
-    the virtual pads only if it applies a hint that, in practice, it does not.
-    Writing the physical device sidesteps the whole question.
-
-    The pads are matched by MAC, which is why preflight pairs each virtual pad
-    to its hardware in the first place. A pad nobody has pressed a button on
-    has no MAC yet and falls back to its virtual name.
+    Deliberately evdev rather than SDL. Dolphin opens both, but its SDL
+    backend's device names are ambiguous under Steam Input — SDL calls every
+    virtual pad "Steam Virtual Gamepad" while the kernel gives each a distinct
+    name — and SDL 2.32 hides them from processes Steam did not launch, which
+    took three separate workarounds and still did not drive a game. evdev has
+    neither problem: unique names, no hint, no visibility rules.
     """
-    by_mac = {}
-    if rows:
-        for n, name, mac in rows:
-            if mac:
-                by_mac[mac.lower()] = (n, name)
-
     seen = {}
     out = {}
     for pad in sorted(pads, key=lambda p: p.index):
-        hit = by_mac.get((pad.mac or "").lower()) if pad.mac else None
-        if hit:
-            out[pad.key] = f"SDL/{hit[0]}/{hit[1]}"
-            continue
-        name = pad.gc_name or pad.name
+        name = kernel_name(pad)
         n = seen.get(name, 0)
         seen[name] = n + 1
-        out[pad.key] = f"SDL/{n}/{name}"
+        out[pad.key] = f"evdev/{n}/{name}"
     return out
 
 
@@ -1552,12 +1599,13 @@ def write_dolphin_config(cfg_dir, pads):
     if sections is None:
         return ["cannot read GCPadNew.ini"]
 
-    devices = dolphin_device_names(pads, dolphin_real_devices())
+    devices = dolphin_device_names(pads)
     ours = {}
     for pad in assigned:
-        face = DOLPHIN_FACE_MIRRORED if pad.swap_faces else DOLPHIN_FACE_IDENTITY
+        face = (DOLPHIN_EVDEV_MIRRORED if pad.swap_faces
+                else DOLPHIN_EVDEV_IDENTITY)
         rows = [("Device", devices[pad.key])]
-        rows += [(k, v.format(**face)) for k, v in DOLPHIN_GC_TEMPLATE]
+        rows += [(k, v.format(**face)) for k, v in DOLPHIN_GC_EVDEV_TEMPLATE]
         ours[f"GCPad{pad.slot}"] = rows
 
     # Keep any section we do not own (GBA pads, keyboard entries) untouched,
@@ -1974,8 +2022,11 @@ def prepare_command(cmd, backend):
 
 
 def launch(cmd, dry_run):
+    # Logged because it is not the command the shortcut passed in: fixups get
+    # added on the way through, and when a game misbehaves this is the first
+    # thing worth knowing.
+    print("exec:", " ".join(cmd), flush=True)
     if dry_run:
-        print("would exec:", " ".join(cmd))
         return
     # Replacing this process rather than spawning keeps the shell pipeline in
     # preflight.sh alive for as long as the emulator is, which is how Steam
