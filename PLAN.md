@@ -315,7 +315,21 @@ which is a nasty way to fail: check for output, never for the exit code.
     both.
 
   Face buttons are positional (`Buttons/A = Button S`), so the A/B swap is
-  simply S/E versus E/S. Wii remotes are untouched: `WiimoteNew.ini` defaults
+  simply S/E versus E/S.
+
+  **Getting Dolphin to SEE the pads took three attempts; do not undo the
+  third.** Its SDL is 2.32, which hides Steam's virtual pads from processes
+  Steam did not launch, and the flatpak sandbox strips the environment that
+  would say otherwise. Writing the hint into Dolphin's own `[SDL_Hints]`
+  section does not work — measured, twice; it is applied too late. Matching
+  each pad to its physical hardware by MAC does not work either, because
+  `RealWatcher` cannot open `/dev/input` under Steam here, so no pad ever
+  learns its MAC (`note: cannot read /dev/input directly` in launch.log).
+  What does work is `prepare_command()` adding
+  `--env=SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1` to the `flatpak
+  run` line, verified to arrive inside the sandbox. The MAC path is still
+  preferred when a MAC happens to be known, since a physical device needs no
+  hint at all. Wii remotes are untouched: `WiimoteNew.ini` defaults
   to `XInput2/0/Virtual core pointer` and is a separate problem.
 - **Eden** is a Yuzu continuation and inherits Yuzu's INI config, where each
   binding is an engine/guid/port string rather than a single device id.

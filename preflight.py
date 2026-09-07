@@ -1949,6 +1949,30 @@ def message_screen(ui, title, lines, color=BAD):
 
 # ------------------------------------------------------------------- launch
 
+VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
+
+
+def prepare_command(cmd, backend):
+    """Make sure Dolphin can see Steam's virtual pads.
+
+    Its SDL is 2.32, which hides them from any process Steam did not launch,
+    and a flatpak sandbox strips the environment that would say otherwise.
+    Dolphin's own [SDL_Hints] section is applied too late to help. `flatpak
+    run --env=` is the one channel that crosses the sandbox, so we add it to
+    the command we were handed rather than hoping the config is enough.
+    """
+    if backend != "dolphin" or not cmd:
+        return cmd
+    if os.path.basename(cmd[0]) == "flatpak" and len(cmd) > 1 and cmd[1] == "run":
+        if any(a.startswith("--env=SDL_GAMECONTROLLER_ALLOW_STEAM") for a in cmd):
+            return cmd
+        return cmd[:2] + [f"--env={VIRTUAL_PAD_HINT}"] + cmd[2:]
+    # A native or AppImage build inherits our environment directly.
+    key, _, value = VIRTUAL_PAD_HINT.partition("=")
+    os.environ[key] = value
+    return cmd
+
+
 def launch(cmd, dry_run):
     if dry_run:
         print("would exec:", " ".join(cmd))
@@ -2238,6 +2262,7 @@ def main():
         p.close()
     ui.close()
     sdl.SDL_Quit()
+    cmd = prepare_command(cmd, backend)
     launch(cmd, dry_run)
     return 0
 
