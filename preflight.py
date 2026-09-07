@@ -1434,22 +1434,23 @@ DEFAULT_AXES = {"lx": 0, "ly": 1, "rx": 3, "ry": 4, "lt": 2, "rt": 5,
 
 def evdev_abs_codes(pad):
     """The ABS_* codes a pad reports, in order, from its sysfs bitmap."""
-    path = getattr(pad, "devpath", None) or ""
-    if not path.startswith("/dev/input/event"):
-        return []
-    node = f"/sys/class/input/{os.path.basename(path)}/device/capabilities/abs"
-    try:
-        with open(node) as fh:
-            words = fh.read().split()
-    except OSError:
-        return []
-    mask = 0
-    for i, word in enumerate(reversed(words)):
+    for directory in sysfs_input_dirs(pad):
         try:
-            mask |= int(word, 16) << (64 * i)
-        except ValueError:
-            return []
-    return [bit for bit in range(64) if mask >> bit & 1]
+            with open(os.path.join(directory, "capabilities", "abs")) as fh:
+                words = fh.read().split()
+        except OSError:
+            continue
+        mask = 0
+        for i, word in enumerate(reversed(words)):
+            try:
+                mask |= int(word, 16) << (64 * i)
+            except ValueError:
+                mask = 0
+                break
+        codes = [bit for bit in range(64) if mask >> bit & 1]
+        if codes:
+            return codes
+    return []
 
 
 def evdev_axis_map(pad):
@@ -1489,19 +1490,29 @@ def evdev_axis_map(pad):
 DOLPHIN_EVDEV_MIRRORED = {"A": "EAST", "B": "SOUTH", "X": "NORTH", "Y": "WEST"}
 
 
+def sysfs_input_dirs(pad):
+    """The sysfs input directories behind a pad's device node.
+
+    SDL hands back /dev/input/eventN for some pads and /dev/hidrawN for
+    others — Bluetooth Xbox pads go through HIDAPI and report hidraw — so
+    anything reading the kernel's view has to handle both. Getting this wrong
+    is silent: the lookup returns nothing and the caller quietly falls back.
+    """
+    import glob as _g
+    path = getattr(pad, "devpath", None) or ""
+    base = os.path.basename(path)
+    if path.startswith("/dev/input/event"):
+        return [f"/sys/class/input/{base}/device"]
+    if path.startswith("/dev/hidraw"):
+        return sorted(_g.glob(f"/sys/class/hidraw/{base}/device/input/input*"))
+    return []
+
+
 def kernel_name(pad):
     """The name the kernel gives this pad, which is what Dolphin's evdev
     backend calls it. SDL's name is not it: SDL says "Steam Virtual Gamepad"
     where the kernel says "Microsoft X-Box 360 pad 0"."""
-    import glob as _g
-    path = getattr(pad, "devpath", None) or ""
-    nodes = []
-    if path.startswith("/dev/input/event"):
-        nodes = [f"/sys/class/input/{os.path.basename(path)}/device/name"]
-    elif path.startswith("/dev/hidraw"):
-        nodes = _g.glob(
-            f"/sys/class/hidraw/{os.path.basename(path)}/device/input/input*/name")
-    for node in nodes:
+    for node in [os.path.join(d, "name") for d in sysfs_input_dirs(pad)]:
         try:
             got = open(node).read().strip()
         except OSError:
