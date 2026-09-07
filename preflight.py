@@ -1369,6 +1369,92 @@ DOLPHIN_FACE_IDENTITY = {"a": "S", "b": "E", "x": "W", "y": "N"}
 DOLPHIN_FACE_MIRRORED = {"a": "E", "b": "S", "x": "N", "y": "W"}
 
 
+# Enumerate the way Dolphin does: its own SDL, Steam's ignore list cleared
+# (that variable is set for processes Steam launches, and does not cross the
+# flatpak sandbox), and the virtual-gamepad hint deliberately NOT set, so we
+# see the physical pads Dolphin sees by default.
+DOLPHIN_ENUM = r"""
+import ctypes, os, sys
+sdl = ctypes.CDLL(sys.argv[1])
+sdl.SDL_Init(0x00000200 | 0x00002000)
+for f in ("SDL_JoystickNameForIndex", "SDL_GameControllerNameForIndex",
+          "SDL_JoystickPathForIndex"):
+    if hasattr(sdl, f):
+        getattr(sdl, f).restype = ctypes.c_char_p
+
+
+def mac_of(path):
+    # A hidraw node keeps no uniq of its own; the address lives on the input
+    # device hanging off it. An evdev node has it one level up.
+    base = os.path.basename(path)
+    if path.startswith("/dev/hidraw"):
+        import glob as _g
+        nodes = _g.glob("/sys/class/hidraw/%s/device/input/input*/uniq" % base)
+    elif path.startswith("/dev/input/event"):
+        nodes = ["/sys/class/input/%s/device/uniq" % base]
+    else:
+        return ""
+    for node in nodes:
+        try:
+            got = open(node).read().strip().lower()
+        except OSError:
+            continue
+        if got:
+            return got
+    return ""
+
+
+seen = {}
+for i in range(sdl.SDL_NumJoysticks()):
+    gc = sdl.SDL_GameControllerNameForIndex(i)
+    name = (gc or sdl.SDL_JoystickNameForIndex(i) or b"?").decode(errors="replace")
+    path = b""
+    if hasattr(sdl, "SDL_JoystickPathForIndex"):
+        path = sdl.SDL_JoystickPathForIndex(i) or b""
+    n = seen.get(name, 0)
+    seen[name] = n + 1
+    print(n, name, mac_of(path.decode(errors="replace")), sep="\t")
+sdl.SDL_Quit()
+"""
+
+
+def find_dolphin_sdl():
+    """The libSDL2 Dolphin's flatpak links against — the KDE runtime's."""
+    import glob
+    for pattern in (
+            "/var/lib/flatpak/runtime/org.kde.Platform/*/*/*/files/lib/*/libSDL2-2.0.so.0",
+            "/var/lib/flatpak/runtime/org.freedesktop.Platform/*/*/*/files/lib/*/libSDL2-2.0.so.0"):
+        hits = sorted(glob.glob(pattern))
+        if hits:
+            return hits[-1]
+    return None
+
+
+def dolphin_real_devices():
+    """[(index, name, mac)] as Dolphin will see them, physical pads included."""
+    lib = find_dolphin_sdl()
+    if not lib:
+        return None
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("SDL_GAMECONTROLLER_IGNORE_DEVICES",
+                        "SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT",
+                        "SDL_JOYSTICK_HIDAPI_STEAM",
+                        "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD")}
+    try:
+        out = subprocess.run([sys.executable, "-c", DOLPHIN_ENUM, lib], env=env,
+                             capture_output=True, text=True, timeout=20)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    rows = []
+    for line in out.stdout.splitlines():
+        bits = line.split("\t")
+        if len(bits) == 3 and bits[0].isdigit():
+            rows.append((int(bits[0]), bits[1], bits[2]))
+    return rows or None
+
+
 def find_dolphin_config(app_id=None, exe=None):
     """Dolphin's config directory — the one holding GCPadNew.ini."""
     candidates = []
@@ -1388,13 +1474,32 @@ def find_dolphin_config(app_id=None, exe=None):
     return None
 
 
-def dolphin_device_names(pads):
-    """`SDL/<n>/<name>` per pad. The number is Dolphin's index *among devices
-    sharing that name*, not a global one — which is the only thing telling
-    four identical Steam virtual pads apart."""
+def dolphin_device_names(pads, rows=None):
+    """`SDL/<n>/<name>` per pad, as Dolphin will address it.
+
+    Preferably the PHYSICAL pad. Under Steam Input preflight only ever sees
+    Steam's virtual pads, but Dolphin runs in a flatpak where Steam's ignore
+    list does not reach, so it sees the real hardware over hidraw — and sees
+    the virtual pads only if it applies a hint that, in practice, it does not.
+    Writing the physical device sidesteps the whole question.
+
+    The pads are matched by MAC, which is why preflight pairs each virtual pad
+    to its hardware in the first place. A pad nobody has pressed a button on
+    has no MAC yet and falls back to its virtual name.
+    """
+    by_mac = {}
+    if rows:
+        for n, name, mac in rows:
+            if mac:
+                by_mac[mac.lower()] = (n, name)
+
     seen = {}
     out = {}
     for pad in sorted(pads, key=lambda p: p.index):
+        hit = by_mac.get((pad.mac or "").lower()) if pad.mac else None
+        if hit:
+            out[pad.key] = f"SDL/{hit[0]}/{hit[1]}"
+            continue
         name = pad.gc_name or pad.name
         n = seen.get(name, 0)
         seen[name] = n + 1
@@ -1447,7 +1552,7 @@ def write_dolphin_config(cfg_dir, pads):
     if sections is None:
         return ["cannot read GCPadNew.ini"]
 
-    devices = dolphin_device_names(pads)
+    devices = dolphin_device_names(pads, dolphin_real_devices())
     ours = {}
     for pad in assigned:
         face = DOLPHIN_FACE_MIRRORED if pad.swap_faces else DOLPHIN_FACE_IDENTITY
