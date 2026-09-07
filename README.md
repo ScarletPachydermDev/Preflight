@@ -36,13 +36,14 @@ No more troubleshooting while three people wait. **No more you being Player 3.**
 Built for Steam Machine or Deck in a living room, aimed squarely at not making three
 people wait while you work out whose controller is which and inputs work.
 
-**Currently supports only Ryubing (Ryujinx): flatpak, AppImage or tar.** Dolphin and Eden are planned 
+**Supports Ryubing (Ryujinx) — flatpak, AppImage or tar — and Dolphin GameCube pads.** Dolphin's Wii remotes and Eden are planned 
 
 ## Requirements
 
 - SteamOS or a Linux system with Steam
 - Ryubing (Ryujinx) as a Flatpak, an AppImage, or an unpacked tar build
-  (`unsquashfs` is needed for AppImages, and ships with SteamOS)
+  (`unsquashfs` is needed for AppImages, and ships with SteamOS), or
+  Dolphin for GameCube games
 - SDL2 and SDL2_ttf — already present on SteamOS
 
 No Python packages to install. SteamOS has no `pip` and a read-only `/usr`, so
@@ -144,6 +145,7 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - A controller asleep during the check gets no binding at all.
 - Every player is set up as a Pro Controller; handheld and Joy-Con pair are not
   configurable here.
+- On Dolphin only GameCube pads are written. Wii remotes are left alone.
 - If a pad sleeps or wakes in the moment between saving and the emulator
   starting, its assignment can shift.
 - Preflight don't pair controllers. Pair them in your OS first.

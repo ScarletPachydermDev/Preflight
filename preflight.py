@@ -380,6 +380,11 @@ class Pad:
         self.name_crc = guid_name_crc(self.sdl_guid)
         self.vendor, self.product = guid_vendor_product(self.sdl_guid)
 
+        gc = sdl.SDL_GameControllerNameForIndex(index)
+        # Dolphin identifies devices by SDL's *gamepad* name, not the joystick
+        # name — "Xbox One controller" rather than "Microsoft X-Box 360 pad 0".
+        self.gc_name = gc.decode(errors="replace") if gc else self.name
+
         self.handle = sdl.SDL_GameControllerOpen(index)
         self.instance_id = -1
         self.battery = "?"
@@ -983,6 +988,7 @@ def emulator_gamepads(exe=None):
 # see PLAN.md section 7 for the functions a new backend has to supply.
 BACKENDS = {
     "ryujinx": ("ryujinx", "ryubing"),
+    "dolphin": ("dolphin",),
 }
 
 
@@ -1313,6 +1319,198 @@ def write_config(cfg_path, pads, exe=None):
     with open(tmp, "w") as fh:
         json.dump(data, fh, indent=2)
     os.replace(tmp, cfg_path)
+    return []
+
+
+# ------------------------------------------------------------------ dolphin
+
+DOLPHIN_APP_ID = "org.DolphinEmu.dolphin-emu"
+
+# One GameCube pad, in the SDL backend's vocabulary. Copied from what Dolphin
+# itself writes rather than invented — the names are its own ("Button S" is the
+# south face button, "Pad N" the d-pad's north). Face buttons are filled in
+# from the mapping so the A/B swap works the same way it does for Ryujinx.
+DOLPHIN_GC_TEMPLATE = [
+    ("Buttons/A", "`Button {a}`"),
+    ("Buttons/B", "`Button {b}`"),
+    ("Buttons/X", "`Button {x}`"),
+    ("Buttons/Y", "`Button {y}`"),
+    ("Buttons/Z", "`Shoulder R`"),
+    ("Buttons/Start", "Start"),
+    ("D-Pad/Up", "`Pad N`"),
+    ("D-Pad/Down", "`Pad S`"),
+    ("D-Pad/Left", "`Pad W`"),
+    ("D-Pad/Right", "`Pad E`"),
+    ("Main Stick/Up", "`Left Y+`"),
+    ("Main Stick/Down", "`Left Y-`"),
+    ("Main Stick/Left", "`Left X-`"),
+    ("Main Stick/Right", "`Left X+`"),
+    ("Main Stick/Calibration",
+     "100.00 141.42 100.00 141.42 100.00 141.42 100.00 141.42"),
+    ("C-Stick/Up", "`Right Y+`"),
+    ("C-Stick/Down", "`Right Y-`"),
+    ("C-Stick/Left", "`Right X-`"),
+    ("C-Stick/Right", "`Right X+`"),
+    ("C-Stick/Calibration",
+     "100.00 141.42 100.00 141.42 100.00 141.42 100.00 141.42"),
+    ("Triggers/L", "`Trigger L`"),
+    ("Triggers/R", "`Trigger R`"),
+    ("Triggers/L-Analog", "`Trigger L`"),
+    ("Triggers/R-Analog", "`Trigger R`"),
+    ("Rumble/Motor", "Motor"),
+]
+
+# Dolphin names face buttons by position: S is the bottom one. Identity is
+# Dolphin's own default; mirrored swaps the pairs, exactly as FACE_MIRRORED
+# does for Ryujinx.
+DOLPHIN_FACE_IDENTITY = {"a": "S", "b": "E", "x": "W", "y": "N"}
+DOLPHIN_FACE_MIRRORED = {"a": "E", "b": "S", "x": "N", "y": "W"}
+
+
+def find_dolphin_config(app_id=None, exe=None):
+    """Dolphin's config directory — the one holding GCPadNew.ini."""
+    candidates = []
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        candidates.append(os.path.join(base, "User", "Config"))
+    elif app_id:
+        candidates.append(os.path.expanduser(
+            f"~/.var/app/{app_id}/config/dolphin-emu"))
+    else:
+        candidates.append(os.path.expanduser(
+            f"~/.var/app/{DOLPHIN_APP_ID}/config/dolphin-emu"))
+    candidates.append(os.path.expanduser("~/.config/dolphin-emu"))
+    for path in candidates:
+        if os.path.isdir(path):
+            return path
+    return None
+
+
+def dolphin_device_names(pads):
+    """`SDL/<n>/<name>` per pad. The number is Dolphin's index *among devices
+    sharing that name*, not a global one — which is the only thing telling
+    four identical Steam virtual pads apart."""
+    seen = {}
+    out = {}
+    for pad in sorted(pads, key=lambda p: p.index):
+        name = pad.gc_name or pad.name
+        n = seen.get(name, 0)
+        seen[name] = n + 1
+        out[pad.key] = f"SDL/{n}/{name}"
+    return out
+
+
+def read_ini(path):
+    """Sections in file order, each a list of (key, value). Deliberately not
+    configparser: Dolphin's values contain backticks, '&' and repeated
+    spacing that a round trip through configparser would quietly reformat."""
+    sections = []
+    current = None
+    try:
+        with open(path) as fh:
+            for line in fh:
+                line = line.rstrip("\n")
+                if line.startswith("[") and line.endswith("]"):
+                    current = (line[1:-1], [])
+                    sections.append(current)
+                elif current is not None and "=" in line:
+                    k, _, v = line.partition("=")
+                    current[1].append((k.strip(), v.strip()))
+    except OSError:
+        return None
+    return sections
+
+
+def write_ini(path, sections):
+    tmp = path + ".preflight.tmp"
+    with open(tmp, "w") as fh:
+        for name, rows in sections:
+            fh.write(f"[{name}]\n")
+            for k, v in rows:
+                fh.write(f"{k} = {v}\n")
+    os.replace(tmp, path)
+
+
+def write_dolphin_config(cfg_dir, pads):
+    """Write GCPadNew.ini for the assigned pads, and make sure the GameCube
+    ports they land in are actually enabled in Dolphin.ini."""
+    if not cfg_dir:
+        return ["Dolphin's config folder was not found."]
+    assigned = [p for p in pads if p.slot]
+    if not assigned:
+        return ["no controllers assigned"]
+
+    gc_path = os.path.join(cfg_dir, "GCPadNew.ini")
+    sections = read_ini(gc_path) if os.path.isfile(gc_path) else []
+    if sections is None:
+        return ["cannot read GCPadNew.ini"]
+
+    devices = dolphin_device_names(pads)
+    ours = {}
+    for pad in assigned:
+        face = DOLPHIN_FACE_MIRRORED if pad.swap_faces else DOLPHIN_FACE_IDENTITY
+        rows = [("Device", devices[pad.key])]
+        rows += [(k, v.format(**face)) for k, v in DOLPHIN_GC_TEMPLATE]
+        ours[f"GCPad{pad.slot}"] = rows
+
+    # Keep any section we do not own (GBA pads, keyboard entries) untouched,
+    # and replace ours in place so the file's order survives.
+    out, seen = [], set()
+    for name, rows in sections:
+        if name in ours:
+            out.append((name, ours[name]))
+            seen.add(name)
+        else:
+            out.append((name, rows))
+    for name in sorted(ours):
+        if name not in seen:
+            out.append((name, ours[name]))
+
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    if os.path.isfile(gc_path):
+        shutil.copy2(gc_path, os.path.join(BACKUP_DIR, f"GCPadNew.{stamp}.ini"))
+    write_ini(gc_path, out)
+
+    problems = enable_dolphin_ports(cfg_dir, [p.slot for p in assigned], stamp)
+    return problems
+
+
+def enable_dolphin_ports(cfg_dir, slots, stamp):
+    """SIDevice<n> = 6 is 'a standard controller is plugged into this port'.
+    Without it the mappings exist and the port stays empty, which looks
+    exactly like the bindings not having been written at all."""
+    path = os.path.join(cfg_dir, "Dolphin.ini")
+    sections = read_ini(path) if os.path.isfile(path) else []
+    if sections is None:
+        return ["cannot read Dolphin.ini"]
+
+    wanted = {f"SIDevice{s - 1}": "6" for s in slots}
+    core = None
+    for name, rows in sections:
+        if name == "Core":
+            core = rows
+            break
+    if core is None:
+        core = []
+        sections.append(("Core", core))
+
+    changed = False
+    for key, value in wanted.items():
+        for i, (k, v) in enumerate(core):
+            if k == key:
+                if v != value:
+                    core[i] = (k, value)
+                    changed = True
+                break
+        else:
+            core.append((key, value))
+            changed = True
+
+    if changed:
+        if os.path.isfile(path):
+            shutil.copy2(path, os.path.join(BACKUP_DIR, f"Dolphin.{stamp}.ini"))
+        write_ini(path, sections)
     return []
 
 
@@ -1692,14 +1890,21 @@ def main():
     ui = UI(sdl, ttf)
     print(f"window ready: {ui.w}x{ui.h}", flush=True)
     known = load_json(KNOWN_PADS, {})
-    cfg_path = find_config(app_id, exe) if backend == "ryujinx" else None
+    if backend == "dolphin":
+        cfg_path = find_dolphin_config(app_id, exe)
+    elif backend == "ryujinx":
+        cfg_path = find_config(app_id, exe)
+    else:
+        cfg_path = None
     needed = game_expectation(rom)
 
     slots = new_slot_state()
     pads, unmapped = scan_pads(sdl)
     apply_known(pads, known)
     pads = resolve_slots(pads, slots)
-    binding_gaps = config_binding_gaps(cfg_path)
+    # Only Ryujinx keeps bindings we did not write; Dolphin's are replaced
+    # wholesale every time, so there is nothing to inspect for gaps.
+    binding_gaps = config_binding_gaps(cfg_path) if backend == "ryujinx" else []
     print(f"{len(pads)} pad(s), {len(unmapped)} unmapped, "
           f"{len(binding_gaps)} binding gap(s); entering loop", flush=True)
     label_pads(pads)
@@ -1745,7 +1950,10 @@ def main():
                                 f"{target or 'this command'} — the check runs, "
                                 f"but no bindings will be written.")
             elif not cfg_path:
-                warnings.append("Ryujinx Config.json not found — cannot write.")
+                warnings.append(
+                    "Dolphin's config folder not found — cannot write."
+                    if backend == "dolphin"
+                    else "Ryujinx Config.json not found — cannot write.")
             if binding_gaps:
                 warnings.append(f"Ryujinx's saved controller settings are "
                                 f"missing {len(binding_gaps)} binding(s) "
@@ -1883,10 +2091,13 @@ def main():
                 remember(pads, known)   # identities are still worth keeping
                 break
             if not cfg_path:
-                result, state = ["Ryujinx Config.json not found."], "error"
+                result, state = ["Config for this emulator was not found."], "error"
                 continue
             remember(pads, known)
-            problems = write_config(cfg_path, pads, exe)
+            if backend == "dolphin":
+                problems = write_dolphin_config(cfg_path, pads)
+            else:
+                problems = write_config(cfg_path, pads, exe)
             if problems:
                 result, state = problems, "error"
                 continue

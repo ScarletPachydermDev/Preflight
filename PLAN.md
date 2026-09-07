@@ -295,9 +295,28 @@ which is a nasty way to fail: check for output, never for the exit code.
 
 **What will differ, and what to expect:**
 
-- **Dolphin** keeps controller setup in INI files, not JSON, with its own
-  device-naming scheme. Four-player GameCube games make the "which pad is P1"
-  problem more common than on Switch, so it is arguably the better fit.
+- **Dolphin: done for GameCube, 2026-09-05.** `write_dolphin_config()` writes
+  `[GCPad1..4]` into `GCPadNew.ini` and sets `SIDevice<n> = 6` in `Dolphin.ini`
+  — without that last part the mappings exist and the port stays empty, which
+  looks exactly like nothing having been written. Read back from a real config
+  rather than guessed, which turned up three things:
+
+  * Dolphin identifies devices as `<backend>/<index>/<name>` with **no GUID**,
+    so none of §3 applies — no CRC zeroing, no bus byte, no enumerating through
+    the emulator's own SDL.
+  * The name is SDL's **gamepad** name, not the joystick name: `Xbox One
+    controller`, not `Microsoft X-Box 360 pad 0`. Under Steam Input every pad
+    is therefore `Steam Virtual Gamepad` and **only the index separates them**.
+    That index counts devices *sharing that name*, not all devices.
+  * Backends can be mixed within one file, and their vocabularies differ
+    entirely — `evdev/0/8Bitdo SF30 Pro` uses `EAST`/`Axis 7-` where
+    `SDL/0/Steam Controller` uses `` `Button E` ``/`` `Pad N` ``. Preflight
+    always writes SDL devices in SDL vocabulary rather than trying to speak
+    both.
+
+  Face buttons are positional (`Buttons/A = Button S`), so the A/B swap is
+  simply S/E versus E/S. Wii remotes are untouched: `WiimoteNew.ini` defaults
+  to `XInput2/0/Virtual core pointer` and is a separate problem.
 - **Eden** is a Yuzu continuation and inherits Yuzu's INI config, where each
   binding is an engine/guid/port string rather than a single device id.
 
