@@ -1397,27 +1397,95 @@ DOLPHIN_GC_EVDEV_TEMPLATE = [
     ("Buttons/Y", "{Y}"),
     ("Buttons/Z", "TR"),
     ("Buttons/Start", "START"),
-    ("D-Pad/Up", "`Axis 7-`"),
-    ("D-Pad/Down", "`Axis 7+`"),
-    ("D-Pad/Left", "`Axis 6-`"),
-    ("D-Pad/Right", "`Axis 6+`"),
-    ("Main Stick/Up", "`Axis 1-`"),
-    ("Main Stick/Down", "`Axis 1+`"),
-    ("Main Stick/Left", "`Axis 0-`"),
-    ("Main Stick/Right", "`Axis 0+`"),
-    ("C-Stick/Up", "`Axis 4-`"),
-    ("C-Stick/Down", "`Axis 4+`"),
-    ("C-Stick/Left", "`Axis 3-`"),
-    ("C-Stick/Right", "`Axis 3+`"),
-    ("Triggers/L", "`Full Axis 2+`"),
-    ("Triggers/R", "`Full Axis 5+`"),
-    ("Triggers/L-Analog", "`Full Axis 2+`"),
-    ("Triggers/R-Analog", "`Full Axis 5+`"),
+    ("D-Pad/Up", "`Axis {hy}-`"),
+    ("D-Pad/Down", "`Axis {hy}+`"),
+    ("D-Pad/Left", "`Axis {hx}-`"),
+    ("D-Pad/Right", "`Axis {hx}+`"),
+    ("Main Stick/Up", "`Axis {ly}-`"),
+    ("Main Stick/Down", "`Axis {ly}+`"),
+    ("Main Stick/Left", "`Axis {lx}-`"),
+    ("Main Stick/Right", "`Axis {lx}+`"),
+    ("C-Stick/Up", "`Axis {ry}-`"),
+    ("C-Stick/Down", "`Axis {ry}+`"),
+    ("C-Stick/Left", "`Axis {rx}-`"),
+    ("C-Stick/Right", "`Axis {rx}+`"),
+    ("Triggers/L", "`Full Axis {lt}+`"),
+    ("Triggers/R", "`Full Axis {rt}+`"),
+    ("Triggers/L-Analog", "`Full Axis {lt}+`"),
+    ("Triggers/R-Analog", "`Full Axis {rt}+`"),
     ("Rumble/Motor", "Strong"),
     ("Options/Always Connected", "True"),
 ]
 
 DOLPHIN_EVDEV_IDENTITY = {"A": "SOUTH", "B": "EAST", "X": "WEST", "Y": "NORTH"}
+
+# Dolphin's evdev axis numbers are POSITIONS among the axes a device reports,
+# not kernel ABS codes — so they shift from pad to pad and cannot be hardcoded.
+# A Bluetooth Xbox pad puts its right stick on Z/RZ and its triggers on
+# BRAKE/GAS, where Steam's virtual pad uses RX/RY and Z/RZ. Hardcoding the
+# latter bound the left trigger to the right stick's X axis.
+ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ = 0, 1, 2, 3, 4, 5
+ABS_BRAKE, ABS_GAS = 9, 10
+ABS_HAT0X, ABS_HAT0Y = 16, 17
+
+DEFAULT_AXES = {"lx": 0, "ly": 1, "rx": 3, "ry": 4, "lt": 2, "rt": 5,
+                "hx": 6, "hy": 7}
+
+
+def evdev_abs_codes(pad):
+    """The ABS_* codes a pad reports, in order, from its sysfs bitmap."""
+    path = getattr(pad, "devpath", None) or ""
+    if not path.startswith("/dev/input/event"):
+        return []
+    node = f"/sys/class/input/{os.path.basename(path)}/device/capabilities/abs"
+    try:
+        with open(node) as fh:
+            words = fh.read().split()
+    except OSError:
+        return []
+    mask = 0
+    for i, word in enumerate(reversed(words)):
+        try:
+            mask |= int(word, 16) << (64 * i)
+        except ValueError:
+            return []
+    return [bit for bit in range(64) if mask >> bit & 1]
+
+
+def evdev_axis_map(pad):
+    """Which Dolphin axis number carries each stick and trigger on this pad."""
+    codes = evdev_abs_codes(pad)
+    if not codes:
+        return dict(DEFAULT_AXES)
+    pos = {code: i for i, code in enumerate(codes)}
+    axes = dict(DEFAULT_AXES)
+
+    def put(key, *preferred):
+        for code in preferred:
+            if code in pos:
+                axes[key] = pos[code]
+                return
+
+    put("lx", ABS_X)
+    put("ly", ABS_Y)
+    # Right stick: RX/RY normally, Z/RZ on Bluetooth Xbox pads.
+    if ABS_RX in pos and ABS_RY in pos:
+        put("rx", ABS_RX)
+        put("ry", ABS_RY)
+    else:
+        put("rx", ABS_Z)
+        put("ry", ABS_RZ)
+    # Triggers: BRAKE/GAS when present, otherwise Z/RZ — but never the pair
+    # already spent on the right stick.
+    if ABS_BRAKE in pos and ABS_GAS in pos:
+        put("lt", ABS_BRAKE)
+        put("rt", ABS_GAS)
+    else:
+        put("lt", ABS_Z)
+        put("rt", ABS_RZ)
+    put("hx", ABS_HAT0X)
+    put("hy", ABS_HAT0Y)
+    return axes
 DOLPHIN_EVDEV_MIRRORED = {"A": "EAST", "B": "SOUTH", "X": "NORTH", "Y": "WEST"}
 
 
@@ -1619,7 +1687,8 @@ def write_dolphin_config(cfg_dir, pads):
         face = (DOLPHIN_EVDEV_MIRRORED if pad.swap_faces
                 else DOLPHIN_EVDEV_IDENTITY)
         rows = [("Device", devices[pad.key])]
-        rows += [(k, v.format(**face)) for k, v in DOLPHIN_GC_EVDEV_TEMPLATE]
+        fields = dict(face, **evdev_axis_map(pad))
+        rows += [(k, v.format(**fields)) for k, v in DOLPHIN_GC_EVDEV_TEMPLATE]
         ours[f"GCPad{pad.slot}"] = rows
 
     # Keep any section we do not own (GBA pads, keyboard entries) untouched,

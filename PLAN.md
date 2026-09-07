@@ -130,6 +130,18 @@ fire at once). That is what turns `Steam pad f679` into
 
 ## 5. Design decisions worth not undoing
 
+**Do not auto-detect Nintendo vs Xbox button layout** (proposed and rejected
+2026-09-07). SDL can report a controller's type — `SDL_GameControllerGetType`,
+or `SDL_GetGamepadButtonLabel` in SDL3 — and it is tempting to use it to pick
+each pad's default face mapping. Tested against real hardware, plain identity
+gave WYSIWYG on all four pads *including* the Nintendo-labelled 8BitDo: in
+X-input mode it does not merely claim to be an Xbox One S, it maps to match,
+so the button printed A reports as SDL's A and the relabelling cancels out.
+Detection that "corrected" it from its Nintendo lineage would break the one
+pad that was already right. The ID says what a pad pretends to be, not what is
+printed on it, and the manual `L`+`R` toggle remains the honest answer.
+
+
 **Steam Input stays ON.** It was disabled for a long stretch, because it turns
 every pad into an identical Valve virtual device. Two things changed: ids now
 come from the emulator's own SDL, and pads are matched by name-CRC, which
