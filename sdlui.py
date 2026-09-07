@@ -249,6 +249,11 @@ def _bind(sdl, ttf):
     sdl.SDL_IsGameController.argtypes, sdl.SDL_IsGameController.restype = [ci], ci
     sdl.SDL_JoystickNameForIndex.argtypes = [ci]
     sdl.SDL_JoystickNameForIndex.restype = cp
+    # Without a restype ctypes hands back an int, and the caller gets an
+    # AttributeError on .decode() at startup — which is fatal, since every
+    # pad is built through here.
+    sdl.SDL_GameControllerNameForIndex.argtypes = [ci]
+    sdl.SDL_GameControllerNameForIndex.restype = cp
     sdl.SDL_JoystickGetDeviceGUID.argtypes = [ci]
     sdl.SDL_JoystickGetDeviceGUID.restype = SDL_JoystickGUID
     sdl.SDL_JoystickGetGUIDString.argtypes = [SDL_JoystickGUID, cp, ci]

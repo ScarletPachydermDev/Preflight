@@ -380,7 +380,9 @@ class Pad:
         self.name_crc = guid_name_crc(self.sdl_guid)
         self.vendor, self.product = guid_vendor_product(self.sdl_guid)
 
-        gc = sdl.SDL_GameControllerNameForIndex(index)
+        gc = getattr(sdl, "SDL_GameControllerNameForIndex", lambda _i: None)(index)
+        if not isinstance(gc, bytes):
+            gc = None
         # Dolphin identifies devices by SDL's *gamepad* name, not the joystick
         # name — "Xbox One controller" rather than "Microsoft X-Box 360 pad 0".
         self.gc_name = gc.decode(errors="replace") if gc else self.name
