@@ -1533,6 +1533,20 @@ def eden_player_values(sdl, pad, port, sdl_guid=None):
     return out, missing
 
 
+VALVE_VIRTUAL = (0x28de, 0x11ff)
+
+
+def steam_input_off(pads):
+    """True when a pad is reaching us as real hardware.
+
+    With Steam Input on, every pad arrives as an identical Valve virtual
+    controller; with it off, the real vendor and product come through. The
+    Steam Controller stays virtual either way, since Valve always manages its
+    own pad, so one non-Valve pad is enough to tell.
+    """
+    return any((p.vendor, p.product) != VALVE_VIRTUAL for p in pads)
+
+
 def log_pads(pads, when):
     """One line per pad into launch.log. Counts alone are not enough: when a
     run misbehaves the question is always *which* pads were seen, and with
@@ -2273,7 +2287,7 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
                        lit if (moved or on(btn)) else blend(bg, FG, 0.48))
 
 
-def draw_frame(ui, title, subtitle=None, emoji=None):
+def draw_frame(ui, title, subtitle=None, emoji=None, alert=None):
     ui.clear(BG)
     x, y = int(ui.w * 0.05), int(ui.h * 0.06)
     _, title_h = ui.text_size(title, "title", True)
@@ -2285,7 +2299,21 @@ def draw_frame(ui, title, subtitle=None, emoji=None):
             ui.text(emoji, x, y + (title_h - eh) / 2, "head", FG, emoji=True)
             x += ew + int(ui.size["title"] * 0.30)
     ui.text(title, x, y, "title", FG, bold=True)
-    if subtitle:
+    if alert:
+        # Takes the subtitle's place rather than squeezing in beside it: this
+        # is the one message that has to be read from the sofa, so it gets a
+        # filled band and the whole line to itself.
+        bx, by = int(ui.w * 0.05), int(y + title_h + 6)
+        bh = int(ui.size["head"] * 1.55)
+        bw = int(ui.w * 0.90)
+        ui.round_rect(bx, by, bw, bh, int(bh * 0.22), blend(BG, BAD, 0.35))
+        ui.frame(bx, by, bw, bh, BAD, max(2, int(ui.h * 0.004)))
+        room = bw - int(ui.w * 0.04)
+        size = "head" if ui.text_size(alert, "head", True)[0] <= room else "body"
+        _, ah = ui.text_size(alert, size, True)
+        ui.text(alert, int(ui.w * 0.5), by + (bh - ah) / 2, size, FG,
+                bold=True, center=True)
+    elif subtitle:
         # Step down a size rather than run off the edge on a long line.
         room = int(ui.w * 0.90)
         size = "body" if ui.text_size(subtitle, "body")[0] <= room else "small"
@@ -2369,10 +2397,12 @@ def glyph_bar(ui, items):
         x += ui.text_size(label, size)[0] + gap
 
 
-def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed):
+def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
+                  alert=None):
     draw_frame(ui, "Controller check",
                "Controllers must be paired in your OS first \u2014 "
-               "test your inputs before the game starts", emoji="\U0001F6A7")
+               "test your inputs before the game starts", emoji="\U0001F6A7",
+               alert=alert)
 
     gx, gy = int(ui.w * 0.05), int(ui.h * 0.19)
     gw, gh = int(ui.w * 0.90), int(ui.h * 0.63)
@@ -2604,6 +2634,13 @@ def main():
                 pads, unmapped = rescan()
 
             warnings = []
+            # Eden only receives input when Steam Input is on, for reasons
+            # not yet understood (PLAN §7). Nothing we write helps, so the
+            # honest thing is to say so before the game starts rather than
+            # leave four people prodding dead controllers.
+            alert = None
+            if backend == "eden" and pads and steam_input_off(pads):
+                alert = "Turn Steam Input ON for this game \u2014 Eden gets no input without it"
             if backend is None:
                 warnings.append(f"No controller-config backend for "
                                 f"{target or 'this command'} — the check runs, "
@@ -2646,11 +2683,11 @@ def main():
                          for p in pads),
                    cycle.active,
                    tuple((k, tuple(sorted(v.items()))) for k, v in sorted(holds.items())),
-                   tuple(warnings), claimed_p1)
+                   tuple(warnings), claimed_p1, alert)
             if sig != last_sig:
                 last_sig = sig
                 draw_pad_grid(ui, pads, cycle, warnings, needed, holds,
-                              claimed_p1 is not None)
+                              claimed_p1 is not None, alert)
                 ui.present()
 
         elif state == "error":
