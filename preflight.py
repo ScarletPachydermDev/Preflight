@@ -1365,6 +1365,96 @@ EDEN_EMPTY = ("button_screenshot", "button_slleft", "button_slright",
 EDEN_HAT_DIRECTION = {1: "up", 2: "right", 4: "down", 8: "left"}
 
 
+# SDL gives the same pad two different GUIDs depending on whether HIDAPI or
+# evdev claims it — the version field differs, and so does the enumeration
+# order that becomes Eden's `port:`. Measured on one Xbox pad:
+#
+#   HIDAPI  05005f805e040000e002000000006800   /dev/hidraw7
+#   evdev   05005f805e040000e002000003090000   /dev/input/event23
+#
+# Rather than guess which one Eden picks, we force the question: enumerate
+# with HIDAPI off and launch Eden with HIDAPI off, so both sides agree.
+EDEN_NO_HIDAPI = "SDL_JOYSTICK_HIDAPI=0"
+
+EDEN_ENUM = r"""
+import ctypes, os, sys
+sdl = ctypes.CDLL(sys.argv[1])
+sdl.SDL_SetHint(b"SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", b"1")
+sdl.SDL_SetHint(b"SDL_JOYSTICK_HIDAPI", b"0")
+sdl.SDL_Init(0x00000200 | 0x00002000)
+
+
+class G(ctypes.Structure):
+    _fields_ = [("d", ctypes.c_uint8 * 16)]
+
+
+sdl.SDL_JoystickGetDeviceGUID.restype = G
+sdl.SDL_JoystickGetDeviceGUID.argtypes = [ctypes.c_int]
+sdl.SDL_JoystickGetGUIDString.argtypes = [G, ctypes.c_char_p, ctypes.c_int]
+for f in ("SDL_JoystickNameForIndex", "SDL_JoystickPathForIndex"):
+    if hasattr(sdl, f):
+        getattr(sdl, f).restype = ctypes.c_char_p
+
+
+def mac_of(path):
+    if not path.startswith("/dev/input/event"):
+        return ""
+    node = "/sys/class/input/%s/device/uniq" % os.path.basename(path)
+    try:
+        return open(node).read().strip().lower()
+    except OSError:
+        return ""
+
+
+for i in range(sdl.SDL_NumJoysticks()):
+    b = ctypes.create_string_buffer(33)
+    sdl.SDL_JoystickGetGUIDString(sdl.SDL_JoystickGetDeviceGUID(i), b, 33)
+    path = b""
+    if hasattr(sdl, "SDL_JoystickPathForIndex"):
+        path = sdl.SDL_JoystickPathForIndex(i) or b""
+    print(i, b.value.decode(), mac_of(path.decode(errors="replace")), sep="\t")
+sdl.SDL_Quit()
+"""
+
+
+def eden_devices():
+    """[(port, sdl_guid, mac)] as Eden will enumerate them: HIDAPI off."""
+    lib = "libSDL2-2.0.so.0"
+    key, _, value = EDEN_NO_HIDAPI.partition("=")
+    env = dict(os.environ, **{key: value})
+    env.pop("SDL_GAMECONTROLLER_IGNORE_DEVICES", None)
+    try:
+        out = subprocess.run([sys.executable, "-c", EDEN_ENUM, lib], env=env,
+                             capture_output=True, text=True, timeout=20)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    rows = []
+    for line in out.stdout.splitlines():
+        bits = line.split("\t")
+        if len(bits) == 3 and bits[0].isdigit():
+            rows.append((int(bits[0]), bits[1], bits[2]))
+    return rows or None
+
+
+def eden_identity(pad, rows):
+    """(port, guid) for this pad in Eden's own enumeration.
+
+    Matched by MAC for a physical pad, and by GUID for a Steam virtual one,
+    which has no MAC but does carry a unique name-CRC.
+    """
+    if rows:
+        if pad.mac:
+            for port, guid, mac in rows:
+                if mac and mac.lower() == pad.mac.lower():
+                    return port, guid
+        for port, guid, _mac in rows:
+            if guid == pad.sdl_guid:
+                return port, guid
+    return pad.index, pad.sdl_guid
+
+
 def eden_guid(sdl_guid_hex):
     """SDL GUID -> the one Eden stores: the same 32 hex digits with the
     16-bit name-CRC zeroed. Ryujinx does this too (§3); Eden writes it plain
@@ -1405,9 +1495,9 @@ def eden_stick(sdl, handle, x_axis, y_axis):
             f"invert_x:+,invert_y:+,deadzone:0.150000")
 
 
-def eden_player_values(sdl, pad, port):
+def eden_player_values(sdl, pad, port, sdl_guid=None):
     """Every player_<n>_* value for one pad, without the player prefix."""
-    guid = eden_guid(pad.sdl_guid)
+    guid = eden_guid(sdl_guid or pad.sdl_guid)
     head = f"engine:sdl,port:{port},guid:{guid}"
     face = FACE_MIRRORED if pad.swap_faces else FACE_IDENTITY
 
@@ -1551,15 +1641,20 @@ def write_eden_config(cfg_path, pads, sdl):
     if not assigned:
         return ["no controllers assigned"]
 
+    rows = eden_devices()
+    if rows is None:
+        return ["Could not enumerate controllers the way Eden will."]
+
     values = {}
     problems = []
     for pad in assigned:
         if not pad.handle:
             problems.append(f"{pad.label}: SDL has no handle for this pad.")
             continue
-        # Eden's port is its own SDL enumeration index, exactly as Ryujinx's
-        # index is — same trap, same answer.
-        fields, missing = eden_player_values(sdl, pad, pad.index)
+        # Eden's port is an SDL enumeration index — but of ITS enumeration,
+        # which is not ours unless we pin the driver. Same for the guid.
+        port, raw_guid = eden_identity(pad, rows)
+        fields, missing = eden_player_values(sdl, pad, port, raw_guid)
         if missing:
             problems.append(f"{pad.label}: no SDL mapping for "
                             f"{', '.join(missing[:3])}")
@@ -2362,6 +2457,17 @@ def prepare_command(cmd, backend):
     run --env=` is the one channel that crosses the sandbox, so we add it to
     the command we were handed rather than hoping the config is enough.
     """
+    if backend == "eden" and cmd:
+        # Pin the driver Eden's SDL uses, so the ids and ports we just wrote
+        # are the ones it computes. Without this the same pad enumerates in a
+        # different order with a different guid and nothing matches.
+        key, _, value = EDEN_NO_HIDAPI.partition("=")
+        if os.path.basename(cmd[0]) == "flatpak" and len(cmd) > 1 and cmd[1] == "run":
+            if not any(a.startswith(f"--env={key}") for a in cmd):
+                cmd = cmd[:2] + [f"--env={EDEN_NO_HIDAPI}"] + cmd[2:]
+        else:
+            os.environ[key] = value
+        return cmd
     if backend != "dolphin" or not cmd:
         return cmd
     if os.path.basename(cmd[0]) == "flatpak" and len(cmd) > 1 and cmd[1] == "run":

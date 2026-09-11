@@ -376,6 +376,19 @@ which is a nasty way to fail: check for output, never for the exit code.
     reason: 1610 lines in, 1610 out, 44 changed, none outside `[Controls]`.
   * Players beyond the assigned ones get `connected=false`, or a phantom pad
     from a previous session turns up in the game.
+  * **The GUID depends on which SDL driver claims the pad**, and so does the
+    enumeration order that becomes `port:`. Measured on one Xbox pad:
+    HIDAPI gives `05005f805e040000e002000000006800` at `/dev/hidraw7`, evdev
+    gives `…e002000003090000` at `/dev/input/event23` — the version field
+    differs. The orders differ wholesale too: HIDAPI put the virtual pad last,
+    evdev put it first. This is why the first Steam-Input-off run failed with
+    a config that looked perfectly correct.
+
+    Guessing Eden's default would be another coin flip, so the driver is
+    pinned instead: `eden_devices()` enumerates with `SDL_JOYSTICK_HIDAPI=0`
+    and `prepare_command()` launches Eden with the same, so both sides agree
+    by construction. Pads are matched between the two views by MAC, and a
+    Steam virtual pad by its GUID, which carries a unique name-CRC.
   * **A fresh install has no qt-config.ini at all**, and refusing to write
     would strand exactly the person this is for. `set_ini_keys()` creates
     the file and the `[Controls]` section when absent; Qt fills in every
