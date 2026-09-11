@@ -1458,6 +1458,19 @@ def find_eden_config(app_id=None, exe=None):
     return None
 
 
+def eden_config_target(app_id=None, exe=None):
+    """Where Eden's config is, or where it would be. A user who installs Eden
+    and runs preflight before ever opening Eden itself has no qt-config.ini
+    at all; refusing to write would strand exactly the person this is for."""
+    found = find_eden_config(app_id, exe)
+    if found:
+        return found
+    if app_id:
+        return os.path.expanduser(
+            f"~/.var/app/{app_id}/config/eden/qt-config.ini")
+    return os.path.expanduser("~/.config/eden/qt-config.ini")
+
+
 def set_ini_keys(path, section, values):
     """Replace or add `key=value` lines inside one section of a Qt ini,
     leaving every other byte of the file alone.
@@ -1469,6 +1482,8 @@ def set_ini_keys(path, section, values):
     try:
         with open(path) as fh:
             lines = fh.read().split("\n")
+    except FileNotFoundError:
+        lines = []                      # nothing here yet: we are the first
     except OSError:
         return False
 
@@ -1478,7 +1493,13 @@ def set_ini_keys(path, section, values):
             start = i + 1
             break
     if start is None:
-        return False
+        # A fresh install has no file, or has one without our section. Qt
+        # fills in every setting it does not find, so a config holding only
+        # [Controls] is a perfectly good starting point.
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines.append(f"[{section}]")
+        start = len(lines)
     end = len(lines)
     for i in range(start, len(lines)):
         if lines[i].startswith("["):
@@ -1501,9 +1522,13 @@ def set_ini_keys(path, section, values):
     if additions:
         lines[end:end] = additions
 
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    except OSError:
+        return False
     tmp = path + ".preflight.tmp"
     with open(tmp, "w") as fh:
-        fh.write("\n".join(lines))
+        fh.write("\n".join(lines) + "\n")
     os.replace(tmp, path)
     return True
 
@@ -1541,8 +1566,9 @@ def write_eden_config(cfg_path, pads, sdl):
         return problems
 
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    shutil.copy2(cfg_path, os.path.join(
-        BACKUP_DIR, f"qt-config.{time.strftime('%Y%m%d-%H%M%S')}.ini"))
+    if os.path.isfile(cfg_path):
+        shutil.copy2(cfg_path, os.path.join(
+            BACKUP_DIR, f"qt-config.{time.strftime('%Y%m%d-%H%M%S')}.ini"))
     if not set_ini_keys(cfg_path, "Controls", values):
         return ["could not write the [Controls] section of qt-config.ini"]
     return []
@@ -1836,6 +1862,15 @@ def find_dolphin_config(app_id=None, exe=None):
     return None
 
 
+def dolphin_config_target(app_id=None, exe=None):
+    """Where Dolphin's config folder would be if it does not exist yet."""
+    if exe:
+        return os.path.join(os.path.dirname(os.path.abspath(exe)),
+                            "User", "Config")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or DOLPHIN_APP_ID}/config/dolphin-emu")
+
+
 def dolphin_device_names(pads, rows=None):
     """`evdev/<n>/<kernel name>` per pad.
 
@@ -1892,6 +1927,10 @@ def write_dolphin_config(cfg_dir, pads):
     ports they land in are actually enabled in Dolphin.ini."""
     if not cfg_dir:
         return ["Dolphin's config folder was not found."]
+    try:
+        os.makedirs(cfg_dir, exist_ok=True)
+    except OSError:
+        return [f"cannot create {cfg_dir}"]
     assigned = [p for p in pads if p.slot]
     if not assigned:
         return ["no controllers assigned"]
@@ -2389,9 +2428,10 @@ def main():
     print(f"window ready: {ui.w}x{ui.h}", flush=True)
     known = load_json(KNOWN_PADS, {})
     if backend == "dolphin":
-        cfg_path = find_dolphin_config(app_id, exe)
+        cfg_path = find_dolphin_config(app_id, exe) or dolphin_config_target(
+            app_id, exe)
     elif backend == "eden":
-        cfg_path = find_eden_config(app_id, exe)
+        cfg_path = eden_config_target(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:

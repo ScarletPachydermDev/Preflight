@@ -376,6 +376,12 @@ which is a nasty way to fail: check for output, never for the exit code.
     reason: 1610 lines in, 1610 out, 44 changed, none outside `[Controls]`.
   * Players beyond the assigned ones get `connected=false`, or a phantom pad
     from a previous session turns up in the game.
+  * **A fresh install has no qt-config.ini at all**, and refusing to write
+    would strand exactly the person this is for. `set_ini_keys()` creates
+    the file and the `[Controls]` section when absent; Qt fills in every
+    other setting. Verified by moving a real config aside: 438 lines
+    written from nothing, bindings correct. Dolphin's config directory is
+    created the same way.
 
   Its AppImage is **DwarFS**, not squashfs, and `--appimage-extract` with a
   pattern writes nothing while exiting 0 — but no extraction is needed, given
