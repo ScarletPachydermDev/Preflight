@@ -354,8 +354,32 @@ which is a nasty way to fail: check for output, never for the exit code.
   hand-made entry, then checked against the device's own reported
   capabilities. Do not "simplify" this back to SDL device strings. Wii remotes are untouched: `WiimoteNew.ini` defaults
   to `XInput2/0/Virtual core pointer` and is a separate problem.
-- **Eden** is a Yuzu continuation and inherits Yuzu's INI config, where each
-  binding is an engine/guid/port string rather than a single device id.
+- **Eden: done, 2026-09-11.** `write_eden_config()` edits `[Controls]` in
+  `~/.config/eden/qt-config.ini`. Read back from a real config, as always:
+
+  * Eden **zeroes the 16-bit name-CRC too**, exactly as Ryujinx does — the
+    same §3 discovery, in a second emulator. It stores the plain 32 hex
+    digits, not .NET's dashed byte order, and `port:` is its SDL enumeration
+    index, so identical pads have the same id-plus-different-port problem.
+  * Its SDL is **statically linked into the binary** (2.33.0, read out with
+    `strings`), so there is nothing to enumerate through. That turns out not
+    to matter: 2.33 shares the newer bus-byte convention with SteamOS's 2.32,
+    which was verified against the real config — system SDL gives
+    `030079f6de28…`, zero the CRC and you get exactly the `03000000de28…`
+    Eden had stored.
+  * Bindings are **raw joystick numbers** (`button:9`, `axis:2,threshold:…`,
+    `hat:0,direction:up`), which differ per pad. They come from
+    `SDL_GameControllerGetBindForButton/Axis` rather than an assumed Xbox
+    layout — verified to reproduce Eden's own numbers for every control.
+  * Every key carries a `\default` twin that must be set to `false`, or the
+    value is treated as untouched. `set_ini_keys()` is line-surgical for this
+    reason: 1610 lines in, 1610 out, 44 changed, none outside `[Controls]`.
+  * Players beyond the assigned ones get `connected=false`, or a phantom pad
+    from a previous session turns up in the game.
+
+  Its AppImage is **DwarFS**, not squashfs, and `--appimage-extract` with a
+  pattern writes nothing while exiting 0 — but no extraction is needed, given
+  the static link. `--appimage-mount` is the way in if it ever is.
 
 Neither should be assumed to behave like Ryujinx. **Budget a diagnostic pass
 for each** — the two discoveries in §3 were both invisible until a real launch

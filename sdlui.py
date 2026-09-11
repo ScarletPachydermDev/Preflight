@@ -40,6 +40,28 @@ BTN_BACK, BTN_GUIDE, BTN_START = 4, 5, 6
 BTN_LSTICK, BTN_RSTICK, BTN_LSHOULDER, BTN_RSHOULDER = 7, 8, 9, 10
 BTN_DPAD_UP, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT = 11, 12, 13, 14
 
+AXIS_LEFTX, AXIS_LEFTY, AXIS_RIGHTX, AXIS_RIGHTY = 0, 1, 2, 3
+AXIS_TRIGGERLEFT, AXIS_TRIGGERRIGHT = 4, 5
+
+# How SDL says a logical button or axis is physically produced on this pad.
+# Emulators that store raw joystick numbers (Eden keeps "button:9", "hat:0",
+# "axis:2") need this: the numbers differ per device, so asking SDL beats
+# assuming an Xbox layout and hoping.
+BIND_NONE, BIND_BUTTON, BIND_AXIS, BIND_HAT = 0, 1, 2, 3
+
+
+class _BindHat(ctypes.Structure):
+    _fields_ = [("hat", ctypes.c_int), ("hat_mask", ctypes.c_int)]
+
+
+class _BindValue(ctypes.Union):
+    _fields_ = [("button", ctypes.c_int), ("axis", ctypes.c_int),
+                ("hat", _BindHat)]
+
+
+class SDL_GameControllerButtonBind(ctypes.Structure):
+    _fields_ = [("bindType", ctypes.c_int), ("value", _BindValue)]
+
 BUTTON_NAMES = {
     BTN_A: "A", BTN_B: "B", BTN_X: "X", BTN_Y: "Y",
     BTN_BACK: "Back", BTN_GUIDE: "Guide", BTN_START: "Start",
@@ -261,6 +283,11 @@ def _bind(sdl, ttf):
     sdl.SDL_GameControllerClose.argtypes = [vp]
     sdl.SDL_GameControllerGetJoystick.argtypes = [vp]
     sdl.SDL_GameControllerGetJoystick.restype = vp
+    for fn in ("SDL_GameControllerGetBindForButton",
+               "SDL_GameControllerGetBindForAxis"):
+        if hasattr(sdl, fn):
+            getattr(sdl, fn).argtypes = [vp, ci]
+            getattr(sdl, fn).restype = SDL_GameControllerButtonBind
     sdl.SDL_JoystickInstanceID.argtypes, sdl.SDL_JoystickInstanceID.restype = [vp], ci
     sdl.SDL_JoystickCurrentPowerLevel.argtypes = [vp]
     sdl.SDL_JoystickCurrentPowerLevel.restype = ci

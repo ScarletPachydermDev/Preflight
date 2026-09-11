@@ -42,6 +42,7 @@ people wait while you work out whose controller is which and inputs work.
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage, tar | all four players' bindings, as Pro Controllers |
 | **Dolphin** | flatpak | GameCube pads 1–4, and the ports they plug into |
+| **Eden** | AppImage | all four players' bindings, as Pro Controllers |
 
 Ryubing **Canary** works as well as stable — it ships SDL3 where stable ships
 SDL2, and Preflight reads either. Both share `~/.config/Ryujinx` unless you use

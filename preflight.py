@@ -1006,6 +1006,7 @@ def emulator_gamepads(exe=None):
 BACKENDS = {
     "ryujinx": ("ryujinx", "ryubing"),
     "dolphin": ("dolphin",),
+    "eden": ("eden",),
 }
 
 
@@ -1336,6 +1337,214 @@ def write_config(cfg_path, pads, exe=None):
     with open(tmp, "w") as fh:
         json.dump(data, fh, indent=2)
     os.replace(tmp, cfg_path)
+    return []
+
+
+# --------------------------------------------------------------------- eden
+
+EDEN_APP_ID = "dev.eden_emu.eden"
+
+# Eden stores raw joystick numbers — "button:9", "axis:2", "hat:0" — which
+# differ per pad, so every one is read back from SDL rather than assumed.
+EDEN_SIMPLE = {
+    "button_l": BTN_LSHOULDER, "button_r": BTN_RSHOULDER,
+    "button_minus": BTN_BACK, "button_plus": BTN_START,
+    "button_home": sdlui.BTN_GUIDE,
+    "button_lstick": BTN_LSTICK, "button_rstick": BTN_RSTICK,
+    "button_dup": BTN_DPAD_UP, "button_ddown": BTN_DPAD_DOWN,
+    "button_dleft": BTN_DPAD_LEFT, "button_dright": BTN_DPAD_RIGHT,
+}
+EDEN_FACE_BTN = {"A": BTN_A, "B": BTN_B, "X": BTN_X, "Y": BTN_Y}
+EDEN_TRIGGERS = {"button_zl": sdlui.AXIS_TRIGGERLEFT,
+                 "button_zr": sdlui.AXIS_TRIGGERRIGHT}
+# Joy-Con SL/SR and the extras have no place on a Pro Controller. Eden's own
+# word for an unset binding is the literal [empty]; leaving them mapped to the
+# shoulder buttons, as a hand-made config tends to, makes L fire twice.
+EDEN_EMPTY = ("button_screenshot", "button_slleft", "button_slright",
+              "button_srleft", "button_srright", "motionleft", "motionright")
+EDEN_HAT_DIRECTION = {1: "up", 2: "right", 4: "down", 8: "left"}
+
+
+def eden_guid(sdl_guid_hex):
+    """SDL GUID -> the one Eden stores: the same 32 hex digits with the
+    16-bit name-CRC zeroed. Ryujinx does this too (§3); Eden writes it plain
+    rather than in .NET's dashed byte order."""
+    b = bytearray(bytes.fromhex(sdl_guid_hex))
+    b[2:4] = b"\x00\x00"
+    return bytes(b).hex()
+
+
+def eden_fragment(sdl, handle, kind, index):
+    """The device-specific tail of an Eden binding, straight from SDL's own
+    mapping for this pad. None when the pad has no such control."""
+    fn = (sdl.SDL_GameControllerGetBindForAxis if kind == "axis"
+          else sdl.SDL_GameControllerGetBindForButton)
+    try:
+        bind = fn(handle, index)
+    except (AttributeError, ctypes.ArgumentError):
+        return None
+    if bind.bindType == sdlui.BIND_BUTTON:
+        return f"button:{bind.value.button}"
+    if bind.bindType == sdlui.BIND_AXIS:
+        return f"axis:{bind.value.axis},threshold:0.500000,invert:+"
+    if bind.bindType == sdlui.BIND_HAT:
+        direction = EDEN_HAT_DIRECTION.get(bind.value.hat.hat_mask)
+        if direction:
+            return f"hat:{bind.value.hat.hat},direction:{direction}"
+    return None
+
+
+def eden_stick(sdl, handle, x_axis, y_axis):
+    for axis in (x_axis, y_axis):
+        bind = sdl.SDL_GameControllerGetBindForAxis(handle, axis)
+        if bind.bindType != sdlui.BIND_AXIS:
+            return None
+    bx = sdl.SDL_GameControllerGetBindForAxis(handle, x_axis).value.axis
+    by = sdl.SDL_GameControllerGetBindForAxis(handle, y_axis).value.axis
+    return (f"axis_x:{bx},axis_y:{by},offset_x:0.000000,offset_y:0.000000,"
+            f"invert_x:+,invert_y:+,deadzone:0.150000")
+
+
+def eden_player_values(sdl, pad, port):
+    """Every player_<n>_* value for one pad, without the player prefix."""
+    guid = eden_guid(pad.sdl_guid)
+    head = f"engine:sdl,port:{port},guid:{guid}"
+    face = FACE_MIRRORED if pad.swap_faces else FACE_IDENTITY
+
+    out = {"type": "0",            # Pro Controller, as everywhere else here
+           "connected": "true",
+           "vibration_enabled": "true",
+           "vibration_strength": "100",
+           "profile_name": ""}
+
+    wanted = dict(EDEN_SIMPLE)
+    for key, letter in face.items():
+        wanted[key] = EDEN_FACE_BTN[letter]
+
+    missing = []
+    for key, button in wanted.items():
+        frag = eden_fragment(sdl, pad.handle, "button", button)
+        out[key] = f'"{head},{frag}"' if frag else "[empty]"
+        if not frag:
+            missing.append(key)
+    for key, axis in EDEN_TRIGGERS.items():
+        frag = eden_fragment(sdl, pad.handle, "axis", axis)
+        out[key] = f'"{head},{frag}"' if frag else "[empty]"
+        if not frag:
+            missing.append(key)
+    for key, (x, y) in (("lstick", (sdlui.AXIS_LEFTX, sdlui.AXIS_LEFTY)),
+                        ("rstick", (sdlui.AXIS_RIGHTX, sdlui.AXIS_RIGHTY))):
+        frag = eden_stick(sdl, pad.handle, x, y)
+        out[key] = f'"{head},{frag}"' if frag else "[empty]"
+        if not frag:
+            missing.append(key)
+    for key in EDEN_EMPTY:
+        out[key] = "[empty]"
+    return out, missing
+
+
+def find_eden_config(app_id=None, exe=None):
+    candidates = []
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        candidates.append(os.path.join(base, "user", "config", "qt-config.ini"))
+    elif app_id:
+        candidates.append(os.path.expanduser(
+            f"~/.var/app/{app_id}/config/eden/qt-config.ini"))
+    candidates.append(os.path.expanduser("~/.config/eden/qt-config.ini"))
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def set_ini_keys(path, section, values):
+    """Replace or add `key=value` lines inside one section of a Qt ini,
+    leaving every other byte of the file alone.
+
+    Deliberately line-surgical rather than parse-and-rewrite: qt-config.ini
+    is over a thousand lines of settings we have no business reformatting,
+    and its keys carry a ``\\default`` twin that a tidier writer would lose.
+    """
+    try:
+        with open(path) as fh:
+            lines = fh.read().split("\n")
+    except OSError:
+        return False
+
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == f"[{section}]":
+            start = i + 1
+            break
+    if start is None:
+        return False
+    end = len(lines)
+    for i in range(start, len(lines)):
+        if lines[i].startswith("["):
+            end = i
+            break
+
+    where = {}
+    for i in range(start, end):
+        key, sep, _ = lines[i].partition("=")
+        if sep:
+            where[key.strip()] = i
+
+    additions = []
+    for key, value in values.items():
+        line = f"{key}={value}"
+        if key in where:
+            lines[where[key]] = line
+        else:
+            additions.append(line)
+    if additions:
+        lines[end:end] = additions
+
+    tmp = path + ".preflight.tmp"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(lines))
+    os.replace(tmp, path)
+    return True
+
+
+def write_eden_config(cfg_path, pads, sdl):
+    if not cfg_path:
+        return ["Eden's qt-config.ini was not found."]
+    assigned = sorted([p for p in pads if p.slot], key=lambda p: p.slot)
+    if not assigned:
+        return ["no controllers assigned"]
+
+    values = {}
+    problems = []
+    for pad in assigned:
+        if not pad.handle:
+            problems.append(f"{pad.label}: SDL has no handle for this pad.")
+            continue
+        # Eden's port is its own SDL enumeration index, exactly as Ryujinx's
+        # index is — same trap, same answer.
+        fields, missing = eden_player_values(sdl, pad, pad.index)
+        if missing:
+            problems.append(f"{pad.label}: no SDL mapping for "
+                            f"{', '.join(missing[:3])}")
+        for key, value in fields.items():
+            values[f"player_{pad.slot - 1}_{key}"] = value
+            values[f"player_{pad.slot - 1}_{key}\\default"] = "false"
+
+    # Any player beyond the ones we assigned must be switched off, or Eden
+    # keeps a phantom controller from a previous session in the game.
+    for n in range(len(assigned), 8):
+        values[f"player_{n}_connected"] = "false"
+        values[f"player_{n}_connected\\default"] = "false"
+
+    if problems:
+        return problems
+
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    shutil.copy2(cfg_path, os.path.join(
+        BACKUP_DIR, f"qt-config.{time.strftime('%Y%m%d-%H%M%S')}.ini"))
+    if not set_ini_keys(cfg_path, "Controls", values):
+        return ["could not write the [Controls] section of qt-config.ini"]
     return []
 
 
@@ -2181,6 +2390,8 @@ def main():
     known = load_json(KNOWN_PADS, {})
     if backend == "dolphin":
         cfg_path = find_dolphin_config(app_id, exe)
+    elif backend == "eden":
+        cfg_path = find_eden_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -2241,6 +2452,8 @@ def main():
                                 f"but no bindings will be written.")
             elif not cfg_path:
                 warnings.append(
+                    "Eden's qt-config.ini not found — cannot write."
+                    if backend == "eden" else
                     "Dolphin's config folder not found — cannot write."
                     if backend == "dolphin"
                     else "Ryujinx Config.json not found — cannot write.")
@@ -2384,7 +2597,9 @@ def main():
                 result, state = ["Config for this emulator was not found."], "error"
                 continue
             remember(pads, known)
-            if backend == "dolphin":
+            if backend == "eden":
+                problems = write_eden_config(cfg_path, pads, sdl)
+            elif backend == "dolphin":
                 problems = write_dolphin_config(cfg_path, pads)
             else:
                 problems = write_config(cfg_path, pads, exe)
