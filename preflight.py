@@ -2324,77 +2324,153 @@ def draw_hint(ui, hint):
     ui.text(hint, ui.w // 2, int(ui.h * 0.91), "body", DIM, center=True)
 
 
-def glyph_bar(ui, items):
+# Circles for anything that is round on the pad itself: the face buttons,
+# minus and plus, and the two stick presses — L3 and R3 are joysticks, so a
+# pill would read as another shoulder button.
+GLYPH_ROUND = {"+", "\u2013", "A", "B", "X", "Y", "L3", "R3"}
+# The shoulders keep the proportions draw_gamepad gives them, S(0.25) by
+# S(0.165), so the legend shows the same button the pad above it shows.
+GLYPH_WIDE = {"L", "R", "ZL", "ZR"}
+GLYPH_WIDE_RATIO = 0.25 / 0.165
+
+
+def _glyph_metrics(ui, size):
+    """Pill height, per-glyph width, and the spacing that goes with a size."""
+    _, th = ui.text_size("Ag", size)
+    pill_h = int(th * 1.45)
+
+    def glyph_w(g):
+        if g.startswith("sep"):
+            return ui.text_size(g[3:], size, True)[0] + pill_h * 0.20
+        if g in GLYPH_WIDE:
+            return pill_h * GLYPH_WIDE_RATIO
+        tw, _ = ui.text_size(g, size, True)
+        return max(pill_h, tw + pill_h * (0.45 if g in GLYPH_ROUND else 0.85))
+
+    return pill_h, glyph_w, pill_h * 0.26
+
+
+def _item_glyph_widths(ui, glyphs, size):
+    """Width per glyph, with every circle in this entry sharing a diameter.
+
+    "R3" is wider than "L3" in the font, so sizing each circle to its own
+    label gave a combo made of two mismatched buttons.
+    """
+    _pill_h, glyph_w, _spacing = _glyph_metrics(ui, size)
+    widths = {g: glyph_w(g) for g in glyphs}
+    circles = [widths[g] for g in glyphs if g in GLYPH_ROUND]
+    if circles:
+        biggest = max(circles)
+        for g in glyphs:
+            if g in GLYPH_ROUND:
+                widths[g] = biggest
+    return widths
+
+
+def _glyph_item_width(ui, item, size, bold=False):
+    glyphs, token, _tcol, label = item
+    pill_h, _glyph_w, spacing = _glyph_metrics(ui, size)
+    gws = _item_glyph_widths(ui, glyphs, size)
+    w = sum(gws[g] + spacing for g in glyphs)
+    w += ui.text_size(label, size, bold)[0]
+    if token:
+        w += ui.text_size(token, size, True)[0] + pill_h * 0.26
+    return w
+
+
+def _draw_glyph_item(ui, item, x, y_mid, size, bold=False):
+    """One legend entry, vertically centred on y_mid. Returns its width."""
+    glyphs, token, tcol, label = item
+    pill_h, _glyph_w, spacing = _glyph_metrics(ui, size)
+    gws = _item_glyph_widths(ui, glyphs, size)
+    y = y_mid - pill_h / 2
+    x0 = x
+    for g in glyphs:
+        gw = gws[g]
+        shell = blend(BG, FG, 0.20)
+        if g.startswith("sep"):
+            # A bare joiner, not a button: no pill, so "L3 + R3" reads as one
+            # combo rather than three separate things to press.
+            _, sth = ui.text_size(g[3:], size, True)
+            ui.text(g[3:], x + gw / 2, y + (pill_h - sth) / 2, size, DIM,
+                    bold=True, center=True)
+        else:
+            if g in GLYPH_ROUND:
+                # Radius follows the width so a two-character label like L3
+                # sits inside its circle instead of spilling over the edge.
+                ui.fill_circle(x + gw / 2, y + pill_h / 2, max(pill_h, gw) / 2,
+                               shell)
+            else:
+                ui.round_rect(x, y, gw, pill_h, pill_h / 2, shell)
+            if len(g) == 1:
+                ui.glyph_centered(g, x + gw / 2, y + pill_h / 2, size, FG)
+            else:
+                gth = ui.text_size(g, size, True)[1]
+                ui.text(g, x + gw / 2, y + (pill_h - gth) / 2, size, FG,
+                        bold=True, center=True)
+        x += gw + spacing
+    if token:
+        tw, tht = ui.text_size(token, size, True)
+        ui.text(token, x, y_mid - tht / 2, size, tcol, bold=True)
+        x += tw + pill_h * 0.26
+    _, lh = ui.text_size(label, size, bold)
+    ui.text(label, x, y_mid - lh / 2, size, FG if bold else DIM, bold=bold)
+    return (x + ui.text_size(label, size, bold)[0]) - x0
+
+
+def glyph_bar(ui, items, hidden=()):
     """The legend along the bottom, drawn with the same shapes as the pads.
 
     Each entry is (glyphs, token, token_colour, label). The glyphs stay
     neutral — colour on the button itself would imply only that player may
-    press it — and only the player token in the text is tinted. Steps down a
-    size rather than running off the edge, exactly as the subtitle does.
+    press it — and only the player token in the text is tinted.
+
+    The first entry is the one that starts the game, so it is flush left where
+    the eye lands first, and drawn bold. The last entry quits, so it sits hard
+    right, as far from the other controls as the screen allows. Whatever is
+    left over spreads through the middle. The size steps down rather than
+    letting anything run off the edge.
+
+    An index in `hidden` is measured but not drawn, so the entries beside it
+    keep the position they had. Claiming P1 removes that control mid-session,
+    and everything else sliding sideways in response is exactly the sort of
+    thing that makes someone press the wrong button.
     """
-    ROUND = {"+", "\u2013", "A", "B", "X", "Y"}
+    if not items:
+        return
 
-    def measure(size):
-        _, th = ui.text_size("Ag", size)
-        pill_h = int(th * 1.45)
+    margin = int(ui.w * 0.05)
+    y_mid = int(ui.h * 0.925)
 
-        def glyph_w(g):
-            if g.startswith("sep"):
-                return ui.text_size(g[3:], size, True)[0] + pill_h * 0.20
-            tw, _ = ui.text_size(g, size, True)
-            return max(pill_h, tw + pill_h * (0.55 if g in ROUND else 0.85))
+    def fits(size):
+        widths = [_glyph_item_width(ui, it, size, bold=(i == 0))
+                  for i, it in enumerate(items)]
+        _, _, spacing = _glyph_metrics(ui, size)
+        gap = spacing * 3.4
+        return widths, gap, sum(widths) + gap * (len(items) - 1)
 
-        spacing = pill_h * 0.26
-        gap = pill_h * 0.80
+    for size in ("body", "small"):
+        widths, gap, total = fits(size)
+        if total <= ui.w - margin * 2:
+            break
 
-        def label_w(token, label):
-            w = ui.text_size(label, size)[0]
-            if token:
-                w += ui.text_size(token, size, True)[0] + pill_h * 0.26
-            return w
+    xs = [0.0] * len(items)
+    xs[0] = margin
+    if len(items) > 1:
+        xs[-1] = ui.w - margin - widths[-1]
+    middle = range(1, len(items) - 1)
+    if middle:
+        left = xs[0] + widths[0] + gap
+        right = xs[-1] - gap
+        span = sum(widths[i] for i in middle) + gap * (len(list(middle)) - 1)
+        x = left + ((right - left) - span) / 2
+        for i in middle:
+            xs[i] = x
+            x += widths[i] + gap
 
-        widths = [sum(glyph_w(g) + spacing for g in gl) + label_w(tok, lbl)
-                  for gl, tok, _, lbl in items]
-        total = sum(widths) + gap * (len(items) - 1)
-        return pill_h, glyph_w, spacing, gap, widths, total
-
-    size = "body"
-    pill_h, glyph_w, spacing, gap, widths, total = measure(size)
-    if total > ui.w * 0.94:
-        size = "small"
-        pill_h, glyph_w, spacing, gap, widths, total = measure(size)
-
-    x = (ui.w - total) / 2
-    y = int(ui.h * 0.90)
-    for (glyphs, token, tcol, label), w in zip(items, widths):
-        for g in glyphs:
-            gw = glyph_w(g)
-            shell = blend(BG, FG, 0.20)
-            if g.startswith("sep"):
-                # A bare joiner, not a button: no pill, so "L3 + R3" reads as
-                # one combo rather than three separate things to press.
-                _, sth = ui.text_size(g[3:], size, True)
-                ui.text(g[3:], x + gw / 2, y + (pill_h - sth) / 2, size, DIM,
-                        bold=True, center=True)
-            else:
-                if g in ROUND:
-                    ui.fill_circle(x + gw / 2, y + pill_h / 2, pill_h / 2, shell)
-                else:
-                    ui.round_rect(x, y, gw, pill_h, pill_h / 2, shell)
-                if len(g) == 1:
-                    ui.glyph_centered(g, x + gw / 2, y + pill_h / 2, size, FG)
-                else:
-                    gth = ui.text_size(g, size, True)[1]
-                    ui.text(g, x + gw / 2, y + (pill_h - gth) / 2, size, FG,
-                            bold=True, center=True)
-            x += gw + spacing
-        if token:
-            tw, tht = ui.text_size(token, size, True)
-            ui.text(token, x, y + (pill_h - tht) / 2, size, tcol, bold=True)
-            x += tw + pill_h * 0.26
-        _, lh = ui.text_size(label, size)
-        ui.text(label, x, y + (pill_h - lh) / 2, size, DIM)
-        x += ui.text_size(label, size)[0] + gap
+    for i, (item, x) in enumerate(zip(items, xs)):
+        if i not in hidden:
+            _draw_glyph_item(ui, item, x, y_mid, size, bold=(i == 0))
 
 
 def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
@@ -2454,14 +2530,10 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
     dimmed = blend(BG, DIM, 0.55)
     glyph_bar(ui, [
         (["+"], "P1", p1c, "hold to start"),
-        (["\u2013"], "P1", p1c, "hold to exit"),
         (["L3", "sep+", "R3"], None, None, "claim P1"),
-        (["L", "R"], None, anyone, "swap A/B"),
-    ] if not p1_claimed else [
-        (["+"], "P1", p1c, "hold to start"),
-        (["\u2013"], "P1", p1c, "hold to exit"),
-        (["L", "R"], None, anyone, "swap A/B"),
-    ])
+        (["L", "R"], None, anyone, "swap ABXY"),
+        (["\u2013"], "P1", p1c, "hold to quit"),
+    ], hidden={1} if p1_claimed else ())
 
 
 def message_screen(ui, title, lines, color=BAD):

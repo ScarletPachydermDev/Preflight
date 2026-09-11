@@ -88,11 +88,15 @@ def main():
     ap.add_argument("--swap", type=int, action="append", default=[],
                     help="slot number to show with its A/B mirrored")
     ap.add_argument("--alert", help="text for the alert band")
+    ap.add_argument("--size", default="2560x1440",
+                    help="surface to render at; defaults to a 1440p TV, "
+                         "because the offscreen desktop is 1024x768 and 4:3")
     args = ap.parse_args()
 
-    # The size is not ours to choose: UI asks for a fullscreen-desktop
-    # window and the offscreen driver decides what that means (1024x768
-    # here). Everything is laid out in fractions of the surface anyway.
+    # Checking a layout at the wrong aspect ratio is barely checking it: the
+    # offscreen driver's desktop is 1024x768, the living-room target is 16:9.
+    if "x" in args.size:
+        os.environ["PREFLIGHT_WINDOW"] = args.size
     sdl, ttf = sdlui.load_libraries()
     sdlui.set_preinit_hints(sdl)
     if sdl.SDL_Init(sdlui.SDL_INIT_VIDEO | sdlui.SDL_INIT_JOYSTICK

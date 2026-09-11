@@ -353,9 +353,23 @@ class UI:
         sdl.SDL_SetHint(b"SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", b"1")
         sdl.SDL_SetHint(b"SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS", b"0")
 
+        # PREFLIGHT_WINDOW=WxH asks for that exact size instead of the
+        # desktop's. Only shot.py sets it: the offscreen driver's desktop is
+        # 1024x768 and 4:3, so a layout checked there is checked at the wrong
+        # aspect ratio for the television it will actually appear on.
+        want = os.environ.get("PREFLIGHT_WINDOW", "")
+        size, flags = (1280, 800), SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_SHOWN
+        if "x" in want:
+            try:
+                ww, hh = (int(v) for v in want.split("x", 1))
+                if ww > 0 and hh > 0:
+                    size, flags = (ww, hh), SDL_WINDOW_SHOWN
+            except ValueError:
+                pass
+
         self.window = sdl.SDL_CreateWindow(
             title.encode(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-            1280, 800, SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_SHOWN)
+            size[0], size[1], flags)
         if not self.window:
             raise RuntimeError(f"CreateWindow: {sdl.SDL_GetError().decode()}")
 

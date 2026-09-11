@@ -132,9 +132,13 @@ test them without setting anything off. Every action is a hold or a combo:
 
 | `+` hold | Player 1 starts the game |
 |:---|:---|
-| **`−` hold** | **anyone exits** |
 | **`L3`+`R3`** | **claim Player 1 — once per session** |
-| **`L`+`R`** | **mirror your own A/B and X/Y** |
+| **`L`+`R`** | **swap ABXY on your own pad** |
+| **`−` hold** | **anyone quits** |
+
+They appear along the bottom of the screen in that order, with starting the
+game bold on the left and quitting far off to the right, where nobody reaches
+for it by accident.
 
 Player slots follow the order controllers wake up. Whoever is on first is
 Player 1; `L3`+`R3` takes that spot if you are not. It locks after one use so
