@@ -42,7 +42,7 @@ people wait while you work out whose controller is which and inputs work.
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage, tar | all four players' bindings, as Pro Controllers |
 | **Dolphin** | flatpak | GameCube pads 1–4, and the ports they plug into |
-| **Eden** | AppImage | all four players' bindings, as Pro Controllers |
+| **Eden** | AppImage | all four players' bindings, as Pro Controllers — needs Steam Input **on** |
 
 Ryubing **Canary** works as well as stable — it ships SDL3 where stable ships
 SDL2, and Preflight reads either. Both share `~/.config/Ryujinx` unless you use
@@ -161,6 +161,8 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - Every player is set up as a Pro Controller; handheld and Joy-Con pair are not
   configurable here.
 - On Dolphin only GameCube pads are written. Wii remotes are left alone.
+- Eden needs Steam Input **on**. With it off the bindings are written but
+  the game gets no input, for reasons that are not yet understood.
 - If a pad sleeps or wakes in the moment between saving and the emulator
   starting, its assignment can shift.
 - Preflight don't pair controllers. Pair them in your OS first.

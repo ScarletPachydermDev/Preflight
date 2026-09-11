@@ -389,6 +389,26 @@ which is a nasty way to fail: check for output, never for the exit code.
     and `prepare_command()` launches Eden with the same, so both sides agree
     by construction. Pads are matched between the two views by MAC, and a
     Steam virtual pad by its GUID, which carries a unique name-CRC.
+  * **UNRESOLVED: Eden gets no input with Steam Input OFF.** It works with
+    Steam Input on, which is the configuration in use, so this was parked
+    2026-09-11 rather than solved. What was established, so a future attempt
+    does not repeat it:
+
+    - preflight runs, writes, and launches correctly in that mode. The log
+      shows the right pads, the config holds evdev-form ids with matching
+      ports, and the hint reaches Eden's environment.
+    - Pinning `SDL_JOYSTICK_HIDAPI=0` on both sides did not fix it, so a
+      HIDAPI-versus-evdev id mismatch is not the whole story (it *is* a real
+      difference, measured, and worth keeping pinned regardless).
+    - Eden logs nothing whatsoever from its SDL input driver, even with
+      `log_filter="*:Info Input:Trace"` — only its GameCube-adapter, UDP and
+      Joycon drivers appear. So Eden offers no window into what its SDL sees,
+      which is why three hypotheses in a row were guesses.
+
+    **The next step is a measurement, not a theory:** with Steam Input off,
+    bind one button on P1 inside Eden's own controller UI and read the guid
+    and port it writes. That is the only way to see Eden's own view, and it
+    costs a minute. Everything else here was inference.
   * **A fresh install has no qt-config.ini at all**, and refusing to write
     would strand exactly the person this is for. `set_ini_keys()` creates
     the file and the `[Controls]` section when absent; Qt fills in every
