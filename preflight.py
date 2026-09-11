@@ -1443,6 +1443,17 @@ def eden_player_values(sdl, pad, port):
     return out, missing
 
 
+def log_pads(pads, when):
+    """One line per pad into launch.log. Counts alone are not enough: when a
+    run misbehaves the question is always *which* pads were seen, and with
+    Steam Input on or off the same four controllers arrive with entirely
+    different ids."""
+    for pad in sorted(pads, key=lambda p: (p.slot or 99, p.index)):
+        print(f"{when}: slot={pad.slot or '-'} idx={pad.index} "
+              f"guid={pad.sdl_guid} mac={pad.mac or '-'} "
+              f"name={pad.gc_name or pad.name!r}", flush=True)
+
+
 def find_eden_config(app_id=None, exe=None):
     candidates = []
     if exe:
@@ -2448,6 +2459,7 @@ def main():
     print(f"{len(pads)} pad(s), {len(unmapped)} unmapped, "
           f"{len(binding_gaps)} binding gap(s); entering loop", flush=True)
     label_pads(pads)
+    log_pads(pads, "scan")
 
     state = "roster"
     claimed_p1 = None       # key of the pad that took P1; one claim per session
@@ -2637,6 +2649,7 @@ def main():
                 result, state = ["Config for this emulator was not found."], "error"
                 continue
             remember(pads, known)
+            log_pads(pads, "writing")
             if backend == "eden":
                 problems = write_eden_config(cfg_path, pads, sdl)
             elif backend == "dolphin":
