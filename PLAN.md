@@ -516,7 +516,13 @@ those games listed afterwards so artwork and the toggle can be changed later.
   no new run header means the tool never started.
 - **Never launch this on `DISPLAY=:1` over SSH while Game Mode is live** — two
   fullscreen SDL windows appearing from nowhere will wedge gamescope.
-- When changing the UI, render it headlessly (`SDL_VIDEODRIVER=offscreen` plus
-  `SDL_RenderReadPixels`, write a PNG) and **look at it**. That caught a badly
-  distorted gamepad, an off-screen glyph bar, and overlapping controls — all of
-  which compiled and ran perfectly.
+- When changing the UI, run **`./shot.py out.png`** and **look at it**. That
+  caught a badly distorted gamepad, an off-screen glyph bar, and overlapping
+  controls — all of which compiled and ran perfectly. It renders headlessly
+  (`SDL_VIDEODRIVER=offscreen` plus `SDL_RenderReadPixels`, PNG written by hand
+  from zlib), so nothing has to go on the TV — launching the real thing on a
+  live Game Mode session has frozen it before. `--pads N` uses synthetic pads,
+  so it works with nothing awake; `--alert` and `--swap` stage the states that
+  are otherwise awkward to reach. Needs libSDL2_ttf, so it runs on the deck and
+  not necessarily on a dev box. It used to be a throwaway script rewritten from
+  scratch each time it was needed, which is why it is committed now.

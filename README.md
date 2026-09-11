@@ -179,6 +179,9 @@ started fine and the problem is elsewhere. If there is no entry at all, Steam
 never launched it — Steam sometimes believes a shortcut is still running and
 the Play button silently does nothing, which a Steam restart clears.
 
+`shot.py` renders the check screen to a PNG instead of the TV, which is how
+a layout change gets checked: `./shot.py out.png --pads 4`.
+
 `phase0.py` is a standalone diagnostic that prints every controller the system
 can see, how the emulator will identify it, and whether Steam is intercepting.
 Run it if something looks wrong and you want the full picture.
