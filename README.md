@@ -33,8 +33,8 @@ No more troubleshooting while three people wait. **No more you being Player 3.**
 
 ## Notes
 
-Built for Steam Machine or Deck in a living room, aimed squarely at not making three
-people wait while you work out whose controller is which and inputs work.
+Built for Steam Machine or Deck in a living room for multiplayer games, aimed squarely at not making other
+players wait while you work out whose controller is which and inputs work.
 
 ## Supported emulators
 
