@@ -48,11 +48,11 @@ Ryubing **Canary** works as well as stable — it ships SDL3 where stable ships
 SDL2, and Preflight reads either. Both share `~/.config/Ryujinx` unless you use
 portable mode, so bindings written for one are picked up by the other.
 
-Dolphin's **Wii remotes** are left alone, and **Eden** is not supported yet.
+Dolphin's **Wii remotes** are left alone.
 
 Point Preflight at an emulator it does not know and it still runs the check and
 still launches the game — it just says on screen that no bindings were written.
-So it is useful in front of anything, and only writes config for the two above.
+So it is useful in front of anything, and only writes config for the three above.
 
 ## Requirements
 
