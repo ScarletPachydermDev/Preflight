@@ -197,7 +197,8 @@ while it was away keeps their place.
 
 ## 7. Supporting other emulators
 
-Dolphin and Eden are planned. The split is cleaner than it looks: roughly
+Dolphin and Eden were planned as separate backends. The split is cleaner than
+it looks: roughly
 1200 of ~1500 lines — the screen, input model, identity work, `RealWatcher`,
 rumble, theming, launching — know nothing about Ryujinx. The emulator-specific
 surface is these, and nothing else:
@@ -218,6 +219,13 @@ verbatim; `command_target()` pulls the flatpak app id (or binary name) out of
 it, and `backend_for()` matches that against the `BACKENDS` table. Adding an
 emulator therefore starts with one line in `BACKENDS` and ends with the
 functions above.
+
+Wheel Wizard is a launcher rather than an emulator. Its native Linux shortcut
+is recognized as a Dolphin backend, so Preflight writes the normal Dolphin
+Flatpak config before handing the original command to Wheel Wizard. Wheel
+Wizard then performs its own mod preparation and starts Dolphin with those
+bindings. The Steam virtual-pad SDL hint is also preserved through that child
+launch.
 
 Guessing was the old way and it does not survive a second Switch emulator:
 `find_app_id()` grepped `flatpak list` for "ryu", and no ROM path can say

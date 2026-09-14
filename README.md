@@ -42,17 +42,25 @@ players wait while you work out whose controller is which and inputs work.
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage, tar | all four players' bindings, as Pro Controllers |
 | **Dolphin** | flatpak | GameCube pads 1–4, and the ports they plug into |
+| **Wheel Wizard** | Flatpak, native Linux build | writes Dolphin's GameCube pads before Wheel Wizard launches it |
 | **Eden** | AppImage | all four players' bindings, as Pro Controllers — needs Steam Input **on** |
 
 Ryubing **Canary** works as well as stable — it ships SDL3 where stable ships
 SDL2, and Preflight reads either. Both share `~/.config/Ryujinx` unless you use
 portable mode, so bindings written for one are picked up by the other.
 
-Dolphin's **Wii remotes** are left alone.
+Dolphin's **Wii remotes** are left alone. A Wheel Wizard shortcut is recognized
+as a Dolphin launcher: Preflight writes the appropriate Dolphin config first,
+then hands the original command to Wheel Wizard. For the Wheel Wizard Flatpak,
+that is its bundled Dolphin config under
+`~/.var/app/io.github.TeamWheelWizard.WheelWizard/config-dolphin-emu/`; for
+the native build, it is the normal Dolphin Flatpak config. Wheel Wizard can
+then prepare its mods and launch Dolphin with the checked controller setup.
 
 Point Preflight at an emulator it does not know and it still runs the check and
 still launches the game — it just says on screen that no bindings were written.
-So it is useful in front of anything, and only writes config for the three above.
+So it is useful in front of anything, and only writes config for the supported
+backends above.
 
 ## Requirements
 
@@ -105,7 +113,8 @@ Keep the quotes around ROM paths — they have spaces in them.
 **If Preflight has no backend for what you point it at**, it says so on screen,
 runs the check anyway and still launches. You get the "who is holding what"
 screen in front of any emulator; you just do not get its bindings written.
-Ryubing (Ryujinx) is the only backend today.
+Ryubing (Ryujinx), Dolphin, Eden, and Wheel Wizard's Dolphin launch path are
+supported backends today.
 
 Each run writes its version and what it was asked to launch to
 `~/.local/state/preflight/launch.log`.
@@ -189,5 +198,3 @@ a layout change gets checked: `./shot.py out.png --pads 4`.
 `phase0.py` is a standalone diagnostic that prints every controller the system
 can see, how the emulator will identify it, and whether Steam is intercepting.
 Run it if something looks wrong and you want the full picture.
-
-

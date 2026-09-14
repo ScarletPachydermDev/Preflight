@@ -49,6 +49,66 @@ from sdlui import (UI, BTN_A, BTN_B, BTN_X, BTN_Y, BTN_START, BTN_BACK,
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERSION_FILE = os.path.join(HERE, "VERSION")
+ART_DIR = os.path.join(HERE, "art")
+
+
+def art(name):
+    """Path to a button glyph. Kenney's outline set, CC0, drawn in pure white
+    so SDL's colour modulation can tint it to any player colour — the reason
+    this set was chosen over the shaded ones."""
+    return os.path.join(ART_DIR, name + ".png")
+
+
+# The ring around each face button: is the label telling the truth?
+RING_OK = (74, 232, 122)
+RING_BAD = (232, 162, 60)
+
+# A pad whose buttons carry NINTENDO semantics: the one SDL calls A is the
+# one the player knows as B. Keyed on what the pad REPORTS ITSELF AS, not on
+# what is printed on the plastic — because that is what decides the semantics.
+# An 8BitDo SF30 Pro has Nintendo lettering, but in X-input mode it presents
+# itself as an Xbox pad and its buttons behave that way, so the default
+# mapping is already truthful; flipped into Switch mode the same pad reports
+# as a Pro Controller and the mirrored mapping becomes the truthful one.
+# Getting this from the silkscreen was wrong in exactly that case.
+NINTENDO_LAYOUT_HINTS = (
+    "nintendo", "switch pro", "pro controller", "joy-con", "joycon",
+    "famicom", "super nintendo",
+)
+NINTENDO_VENDOR = 0x057E
+
+
+def nintendo_layout(pad):
+    """True when this pad's A and B are the other way round from SDL's.
+
+    Reads the physical device when preflight has paired one — under Steam
+    Input the virtual pad's own vendor is always Valve's and says nothing.
+    """
+    real = getattr(pad, "real", None) or {}
+    vendor = real.get("vendor") if real else pad.vendor
+    if vendor == NINTENDO_VENDOR:
+        return True
+    name = (real.get("name") if real else None) or pad.name or ""
+    return any(h in name.lower() for h in NINTENDO_LAYOUT_HINTS)
+
+
+def default_swap(pad):
+    """The swap setting that makes this pad truthful with nobody touching it.
+
+    Every controller should be WYSIWYG out of the box, whichever layout it
+    has; L+R is there for someone who would rather have position accuracy.
+    """
+    return nintendo_layout(pad)
+
+
+def pad_wysiwyg(pad):
+    """True when the button printed A really acts as A on this pad.
+
+    Identity mapping is truthful on an Xbox-layout pad; the mirrored one is
+    truthful on a Nintendo-layout pad. So the two agree exactly when the
+    swap setting matches the layout.
+    """
+    return bool(pad.swap_faces) == nintendo_layout(pad)
 
 # Nothing the user owns lives beside the code. SelfSteam embeds this project
 # and replaces the whole directory when it updates, so the install folder has
@@ -418,6 +478,7 @@ class Pad:
         # A/B and X/Y always move together — no real controller mirrors one
         # pair without the other — so this is a single setting.
         self.swap_faces = False
+        self.swap_explicit = False    # True once a player has pressed L+R
 
     @property
     def store_key(self):
@@ -664,9 +725,16 @@ def apply_known(pads, known):
             # means "write the mirrored mapping". Old values invert in effect,
             # so anything below schema 3 starts from the default. And it is
             # only trusted from a hardware-keyed record — see is_hardware_key.
-            p.swap_faces = (bool(rec.get("swap_faces"))
-                            if rec.get("schema", 0) >= 3
-                            and is_hardware_key(p.store_key) else False)
+            # Schema 4 records the difference between "the user chose this"
+            # and "this was the default at the time". Only a deliberate choice
+            # survives, so a pad whose layout we later learn about corrects
+            # itself instead of staying wrong.
+            explicit = (rec.get("schema", 0) >= 4
+                        and bool(rec.get("swap_explicit"))
+                        and is_hardware_key(p.store_key))
+            p.swap_explicit = explicit
+            p.swap_faces = (bool(rec.get("swap_faces")) if explicit
+                            else default_swap(p))
 
 
 
@@ -674,7 +742,7 @@ def remember(pads, known):
     for p in pads:
         if p.slot:
             known[p.store_key] = {
-                "schema": 3,
+                "schema": 4,
                 # Left null so the label stays automatic; set it by hand in
                 # this file to override.
                 "nickname": p.nickname,
@@ -688,6 +756,7 @@ def remember(pads, known):
                 # virtual-pad slot would hand the setting to whichever
                 # controller Steam parks there next time.
                 "swap_faces": p.swap_faces if is_hardware_key(p.store_key) else False,
+                "swap_explicit": bool(getattr(p, "swap_explicit", False)),
                 "last_seen": time.strftime("%Y-%m-%dT%H:%M:%S"),
             }
     save_known(known)
@@ -748,9 +817,16 @@ def bind_real(pad, info, known, pads):
     rec = known.get(pad.store_key)
     if rec:
         pad.nickname = rec.get("nickname") if rec.get("schema", 0) >= 2 else None
-        pad.swap_faces = (bool(rec.get("swap_faces"))
-                          if rec.get("schema", 0) >= 3
-                          and is_hardware_key(pad.store_key) else False)
+        explicit = (rec.get("schema", 0) >= 4
+                    and bool(rec.get("swap_explicit"))
+                    and is_hardware_key(pad.store_key))
+        pad.swap_explicit = explicit
+        pad.swap_faces = (bool(rec.get("swap_faces")) if explicit
+                          else default_swap(pad))
+    else:
+        # Pairing just told us what this really is; take the default it implies.
+        if not getattr(pad, "swap_explicit", False):
+            pad.swap_faces = default_swap(pad)
     label_pads(pads)
 
 
@@ -1005,6 +1081,7 @@ def emulator_gamepads(exe=None):
 # see PLAN.md section 7 for the functions a new backend has to supply.
 BACKENDS = {
     "ryujinx": ("ryujinx", "ryubing"),
+    "wheelwizard": ("wheelwizard",),
     "dolphin": ("dolphin",),
     "eden": ("eden",),
 }
@@ -1969,17 +2046,24 @@ def find_dolphin_config(app_id=None, exe=None):
     if exe:
         base = os.path.dirname(os.path.abspath(exe))
         candidates.append(os.path.join(base, "User", "Config"))
-    elif app_id:
+    elif app_id == DOLPHIN_APP_ID:
         candidates.append(os.path.expanduser(
             f"~/.var/app/{app_id}/config/dolphin-emu"))
-    else:
-        candidates.append(os.path.expanduser(
-            f"~/.var/app/{DOLPHIN_APP_ID}/config/dolphin-emu"))
+    candidates.append(os.path.expanduser(
+        f"~/.var/app/{DOLPHIN_APP_ID}/config/dolphin-emu"))
     candidates.append(os.path.expanduser("~/.config/dolphin-emu"))
     for path in candidates:
         if os.path.isdir(path):
             return path
     return None
+
+
+def wheelwizard_dolphin_config():
+    """Dolphin config used by Wheel Wizard's Flatpak-bundled Dolphin."""
+    path = os.path.expanduser(
+        "~/.var/app/io.github.TeamWheelWizard.WheelWizard/"
+        "config-dolphin-emu/dolphin-emu")
+    return path if os.path.isdir(path) else None
 
 
 def dolphin_config_target(app_id=None, exe=None):
@@ -2181,7 +2265,7 @@ PAD_ASPECT = 2.4        # a wide strip; the bays are much wider than they are ta
 
 
 def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
-                 dim=False, holds=None):
+                 dim=False, holds=None, wys=None):
     """A button map — no controller body.
 
     Drawing a shape means picking *a* shape, and every real pad is a different
@@ -2218,43 +2302,60 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
 
     # Top strip: triggers and shoulders in the outer corners, minus/plus in
     # the middle. Kept in one row so the columns below stay clear.
-    for xf, label, btn, axis in ((0.075, "ZL", None, 4),
-                                 (0.215, "L", BTN_LSHOULDER, None),
-                                 (0.785, "R", BTN_RSHOULDER, None),
-                                 (0.925, "ZR", None, 5)):
-        active = on(btn) if btn is not None else axes.get(axis, 0) > 8000
-        w, h = S(0.25), S(0.165)
-        ui.round_rect(X(xf) - w / 2, Y(0.085) - h / 2, w, h, h / 2,
-                      lit if active else idle)
-        pad_text(label, X(xf), Y(0.085), bg if active else label_col)
+    def button(name, cx, cy, side, active):
+        """Idle draws the outline glyph; pressed draws Kenney's filled one,
+        whose label is knocked out of the shape — so a press reads as the
+        player's colour with the letter showing the bay through it."""
+        ui.image(art(name + "_on" if active else name), cx - side / 2,
+                 cy - side / 2, side, side, lit if active else idle)
 
-    for xf, btn, label in ((0.405, BTN_BACK, "\u2013"), (0.595, BTN_START, "+")):
-        active = on(btn)
-        ui.fill_circle(X(xf), Y(0.085), S(0.072), lit if active else idle)
-        pad_text(label, X(xf), Y(0.085), bg if active else label_col)
+    for xf, name, btn, axis in ((0.075, "zl", None, 4),
+                                (0.215, "l", BTN_LSHOULDER, None),
+                                (0.785, "r", BTN_RSHOULDER, None),
+                                (0.925, "zr", None, 5)):
+        active = on(btn) if btn is not None else axes.get(axis, 0) > 8000
+        button(name, X(xf), Y(0.085), S(0.31), active)
+
+    for xf, btn, name in ((0.405, BTN_BACK, "minus"), (0.595, BTN_START, "plus")):
+        button(name, X(xf), Y(0.085), S(0.21), on(btn))
         held_for = (holds or {}).get(btn, 0.0)
         if held_for > 0:
             hold_ring(ui, X(xf), Y(0.085), S(0.135), held_for, lit,
                       blend(bg, FG, 0.18))
 
-    # Left column: d-pad. Right column: face buttons. Sticks sit between them.
-    dcx, dcy = X(0.135), Y(0.62)
-    # Equal arm and stem make a symmetrical cross; square corners keep the
-    # joins seamless, where rounded ones left notches at the centre.
-    cell = S(0.150)
-    # Snap every edge to the same integers the neighbouring cell uses.
-    # Computing each arm independently let rounding open a one-pixel seam,
-    # which showed up as a gap on the right arm only.
-    x0, x1 = round(dcx - cell / 2), round(dcx + cell / 2)
-    y0, y1 = round(dcy - cell / 2), round(dcy + cell / 2)
-    span = x1 - x0
-    ui.rect(x0, y0, span, y1 - y0, idle)
-    for btn, rx, ry, rw, rh in (
-            (BTN_DPAD_UP, x0, y0 - span, span, span),
-            (BTN_DPAD_DOWN, x0, y1, span, span),
-            (BTN_DPAD_LEFT, x0 - span, y0, span, y1 - y0),
-            (BTN_DPAD_RIGHT, x1, y0, span, y1 - y0)):
-        ui.rect(rx, ry, rw, rh, lit if on(btn) else idle)
+    # One row, four lanes, equal air between them — the PSD puts the d-pad,
+    # both sticks and the cluster on a single centre line. Each lane is as
+    # wide as its content can ever get: a stick at full deflection, the face
+    # cluster including its rings. Computed rather than hand-placed, because
+    # every time these were fixed fractions a size change put two of them on
+    # top of each other.
+    dside = S(0.48)
+    sside = S(0.36)
+    stravel = sside * 0.28
+    fside = S(0.30)
+    fspread = S(0.215)
+    ring_t = max(2.0, S(0.026))
+    freach = fspread + fside * 0.375 + ring_t
+
+    lanes = (dside, sside + 2 * stravel, sside + 2 * stravel, 2 * freach)
+    air = (dw - sum(lanes)) / (len(lanes) + 1)
+    centres, run = [], ox + air
+    for lane in lanes:
+        centres.append(run + lane / 2)
+        run += lane + air
+    row_y = Y(0.635)
+
+    # The directional art is the same cross with one arm marked, so a pressed
+    # direction goes straight over the idle cross — a diagonal shows both arms
+    # for free. The d-pad keeps the plain tint: it is not a button with a
+    # label to knock out.
+    ui.image(art("dpad"), centres[0] - dside / 2, row_y - dside / 2,
+             dside, dside, idle)
+    for btn, name in ((BTN_DPAD_UP, "dpad_up"), (BTN_DPAD_DOWN, "dpad_down"),
+                      (BTN_DPAD_LEFT, "dpad_left"), (BTN_DPAD_RIGHT, "dpad_right")):
+        if on(btn):
+            ui.image(art(name), centres[0] - dside / 2, row_y - dside / 2,
+                     dside, dside, lit)
 
     # Face buttons are drawn in the Switch's arrangement — X top, Y left,
     # A right, B bottom — and each lights by NAME, not by position. Press the
@@ -2268,23 +2369,32 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
             name = BUTTON_NAMES[btn]
             live.add(mirror[name] if swap else name)
 
-    fcx, fcy, spread, br = X(0.855), Y(0.62), S(0.205), S(0.112)
-    for letter, dx, dy in (("X", 0, -1), ("Y", -1, 0), ("A", 1, 0), ("B", 0, 1)):
-        cx, cy = fcx + dx * spread, fcy + dy * spread
-        active = letter in live
-        ui.fill_circle(cx, cy, br, lit if active else idle)
-        pad_text(letter, cx, cy, bg if active else label_col)
+    fcx, fcy = centres[3], row_y
+    for letter, name, dx, dy in (("X", "x", 0, -1), ("Y", "y", -1, 0),
+                                 ("A", "a", 1, 0), ("B", "b", 0, 1)):
+        cx, cy = fcx + dx * fspread, fcy + dy * fspread
+        if wys is not None:
+            # Concentric by construction, and touching: measured off the art,
+            # the glyph's own circle ends at 0.375 of the box side (96px of
+            # ink in a 128px canvas), so the ring starts exactly there.
+            inner = fside * 0.375
+            ui.ring(cx, cy, inner, inner + ring_t,
+                    RING_OK if wys else RING_BAD)
+        button(name, cx, cy, fside, letter in live)
 
     # sticks: a dim well with a knob that actually moves
-    for xf, btn, ax, ay in ((0.360, BTN_LSTICK, 0, 1), (0.585, BTN_RSTICK, 2, 3)):
-        cx, cy = X(xf), Y(0.645)
-        well = S(0.150)
-        ui.fill_circle(cx, cy, well, idle)
-        kx = (axes.get(ax, 0) / 32768.0) * well * 0.45
-        ky = (axes.get(ay, 0) / 32768.0) * well * 0.45
+    for lane, btn, ax, ay, name in ((1, BTN_LSTICK, 0, 1, "stick_l"),
+                                    (2, BTN_RSTICK, 2, 3, "stick_r")):
+        cx, cy = centres[lane], row_y
+        # The well shows where centre is, so a deflection reads as movement
+        # rather than as a glyph that happens to sit off to one side.
+        ui.fill_circle(cx, cy, sside * 0.50, blend(bg, FG, 0.12))
+        kx = (axes.get(ax, 0) / 32768.0) * stravel
+        ky = (axes.get(ay, 0) / 32768.0) * stravel
         moved = abs(kx) + abs(ky) > 1.5
-        ui.fill_circle(cx + kx, cy + ky, S(0.088),
-                       lit if (moved or on(btn)) else blend(bg, FG, 0.48))
+        ui.image(art(name), cx + kx - sside / 2, cy + ky - sside / 2,
+                 sside, sside,
+                 lit if (moved or on(btn)) else blend(bg, FG, 0.48))
 
 
 def draw_frame(ui, title, subtitle=None, emoji=None, alert=None):
@@ -2327,11 +2437,12 @@ def draw_hint(ui, hint):
 # Circles for anything that is round on the pad itself: the face buttons,
 # minus and plus, and the two stick presses — L3 and R3 are joysticks, so a
 # pill would read as another shoulder button.
-GLYPH_ROUND = {"+", "\u2013", "A", "B", "X", "Y", "L3", "R3"}
-# The shoulders keep the proportions draw_gamepad gives them, S(0.25) by
-# S(0.165), so the legend shows the same button the pad above it shows.
-GLYPH_WIDE = {"L", "R", "ZL", "ZR"}
-GLYPH_WIDE_RATIO = 0.25 / 0.165
+# The legend draws the same art the pads do, so a glyph means one thing on
+# the whole screen. Everything here is a square image, which also retires the
+# old pill-versus-circle bookkeeping.
+GLYPH_ART = {"+": "plus", "\u2013": "minus", "L3": "stick_side_l", "R3": "stick_side_r",
+             "L": "l", "R": "r"}
+GLYPH_ROUND = {"A", "B", "X", "Y"}
 
 
 def _glyph_metrics(ui, size):
@@ -2342,8 +2453,8 @@ def _glyph_metrics(ui, size):
     def glyph_w(g):
         if g.startswith("sep"):
             return ui.text_size(g[3:], size, True)[0] + pill_h * 0.20
-        if g in GLYPH_WIDE:
-            return pill_h * GLYPH_WIDE_RATIO
+        if g in GLYPH_ART:
+            return pill_h * 1.18          # the art is square, with its own margin
         tw, _ = ui.text_size(g, size, True)
         return max(pill_h, tw + pill_h * (0.45 if g in GLYPH_ROUND else 0.85))
 
@@ -2394,6 +2505,10 @@ def _draw_glyph_item(ui, item, x, y_mid, size, bold=False):
             _, sth = ui.text_size(g[3:], size, True)
             ui.text(g[3:], x + gw / 2, y + (pill_h - sth) / 2, size, DIM,
                     bold=True, center=True)
+        elif g in GLYPH_ART:
+            side = min(gw, pill_h * 1.18)
+            ui.image(art(GLYPH_ART[g]), x + (gw - side) / 2,
+                     y + (pill_h - side) / 2, side, side, FG)
         else:
             if g in GLYPH_ROUND:
                 # Radius follows the width so a two-character label like L3
@@ -2512,7 +2627,8 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
                      pad.held if pad else set(), pad.axes if pad else {},
                      card_bg, swap=pad.swap_faces if pad else False,
                      dim=pad is None,
-                     holds=holds.get(pad.key) if pad else None)
+                     holds=holds.get(pad.key) if pad else None,
+                     wys=pad_wysiwyg(pad) if pad else None)
 
         if pad:
             label, lc = pad.label, FG
@@ -2531,7 +2647,7 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
     glyph_bar(ui, [
         (["+"], "P1", p1c, "hold to start"),
         (["L3", "sep+", "R3"], None, None, "claim P1"),
-        (["L", "R"], None, anyone, "swap ABXY"),
+        (["L", "sep+", "R"], None, anyone, "swap ABXY"),
         (["\u2013"], "P1", p1c, "hold to quit"),
     ], hidden={1} if p1_claimed else ())
 
@@ -2570,7 +2686,7 @@ def prepare_command(cmd, backend):
         else:
             os.environ[key] = value
         return cmd
-    if backend != "dolphin" or not cmd:
+    if backend not in ("dolphin", "wheelwizard") or not cmd:
         return cmd
     if os.path.basename(cmd[0]) == "flatpak" and len(cmd) > 1 and cmd[1] == "run":
         if any(a.startswith("--env=SDL_GAMECONTROLLER_ALLOW_STEAM") for a in cmd):
@@ -2646,9 +2762,18 @@ def main():
     ui = UI(sdl, ttf)
     print(f"window ready: {ui.w}x{ui.h}", flush=True)
     known = load_json(KNOWN_PADS, {})
-    if backend == "dolphin":
-        cfg_path = find_dolphin_config(app_id, exe) or dolphin_config_target(
-            app_id, exe)
+    if backend in ("dolphin", "wheelwizard"):
+        # Wheel Wizard is a native launcher whose child Dolphin uses the
+        # normal Dolphin Flatpak config, not a config beside WheelWizard.
+        if backend == "wheelwizard" and target == "io.github.TeamWheelWizard.WheelWizard":
+            cfg_path = wheelwizard_dolphin_config() or os.path.expanduser(
+                "~/.var/app/io.github.TeamWheelWizard.WheelWizard/"
+                "config-dolphin-emu/dolphin-emu")
+        else:
+            dolphin_app_id = DOLPHIN_APP_ID if backend == "wheelwizard" else app_id
+            dolphin_exe = None if backend == "wheelwizard" else exe
+            cfg_path = find_dolphin_config(dolphin_app_id, dolphin_exe) or \
+                dolphin_config_target(dolphin_app_id, dolphin_exe)
     elif backend == "eden":
         cfg_path = eden_config_target(app_id, exe)
     elif backend == "ryujinx":
@@ -2722,7 +2847,7 @@ def main():
                     "Eden's qt-config.ini not found — cannot write."
                     if backend == "eden" else
                     "Dolphin's config folder not found — cannot write."
-                    if backend == "dolphin"
+                    if backend in ("dolphin", "wheelwizard")
                     else "Ryujinx Config.json not found — cannot write.")
             if binding_gaps:
                 warnings.append(f"Ryujinx's saved controller settings are "
@@ -2819,6 +2944,7 @@ def main():
                         and pad.key not in combo_armed):
                     combo_armed.add(pad.key)
                     pad.swap_faces = not pad.swap_faces
+                    pad.swap_explicit = True
                     remember(pads, known)
 
                 # Claim Player 1. Deliberately one-shot: without the lock a
@@ -2867,7 +2993,7 @@ def main():
             log_pads(pads, "writing")
             if backend == "eden":
                 problems = write_eden_config(cfg_path, pads, sdl)
-            elif backend == "dolphin":
+            elif backend in ("dolphin", "wheelwizard"):
                 problems = write_dolphin_config(cfg_path, pads)
             else:
                 problems = write_config(cfg_path, pads, exe)

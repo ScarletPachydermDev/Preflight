@@ -545,6 +545,29 @@ class UI:
             span = SDL_Rect(cx - dx, cy + dy, 2 * dx + 1, 1)
             self.sdl.SDL_RenderFillRect(self.renderer, ctypes.byref(span))
 
+    def ring(self, cx, cy, r_inner, r_outer, color):
+        """An annulus, scan-filled as two spans per row.
+
+        A real ring rather than a filled disc with a background-coloured disc
+        on top: that trick left the inner edge a pixel out on some rows, which
+        reads as a ring not quite concentric with the button inside it.
+        """
+        self.sdl.SDL_SetRenderDrawColor(self.renderer, color[0], color[1],
+                                        color[2], 255)
+        cx, cy = int(cx), int(cy)
+        ro, ri = int(round(r_outer)), int(round(r_inner))
+        for dy in range(-ro, ro + 1):
+            dxo = int((ro * ro - dy * dy) ** 0.5)
+            if abs(dy) <= ri:
+                dxi = int((ri * ri - dy * dy) ** 0.5)
+                spans = ((cx - dxo, dxo - dxi), (cx + dxi + 1, dxo - dxi))
+            else:
+                spans = ((cx - dxo, 2 * dxo + 1),)
+            for x0, w in spans:
+                if w > 0:
+                    r = SDL_Rect(x0, cy + dy, w, 1)
+                    self.sdl.SDL_RenderFillRect(self.renderer, ctypes.byref(r))
+
     def fill_triangle(self, p1, p2, p3, color):
         """Scanline-filled triangle — SDL2 has no polygon primitive."""
         self.sdl.SDL_SetRenderDrawColor(self.renderer, color[0], color[1],
