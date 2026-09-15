@@ -2058,14 +2058,6 @@ def find_dolphin_config(app_id=None, exe=None):
     return None
 
 
-def wheelwizard_dolphin_config():
-    """Dolphin config used by Wheel Wizard's Flatpak-bundled Dolphin."""
-    path = os.path.expanduser(
-        "~/.var/app/io.github.TeamWheelWizard.WheelWizard/"
-        "config-dolphin-emu/dolphin-emu")
-    return path if os.path.isdir(path) else None
-
-
 def dolphin_config_target(app_id=None, exe=None):
     """Where Dolphin's config folder would be if it does not exist yet."""
     if exe:
@@ -2765,15 +2757,21 @@ def main():
     if backend in ("dolphin", "wheelwizard"):
         # Wheel Wizard is a native launcher whose child Dolphin uses the
         # normal Dolphin Flatpak config, not a config beside WheelWizard.
-        if backend == "wheelwizard" and target == "io.github.TeamWheelWizard.WheelWizard":
-            cfg_path = wheelwizard_dolphin_config() or os.path.expanduser(
-                "~/.var/app/io.github.TeamWheelWizard.WheelWizard/"
-                "config-dolphin-emu/dolphin-emu")
-        else:
-            dolphin_app_id = DOLPHIN_APP_ID if backend == "wheelwizard" else app_id
-            dolphin_exe = None if backend == "wheelwizard" else exe
-            cfg_path = find_dolphin_config(dolphin_app_id, dolphin_exe) or \
-                dolphin_config_target(dolphin_app_id, dolphin_exe)
+        #
+        # Writing beside WheelWizard instead is not merely redundant, it
+        # breaks the game outright: WheelWizard creates
+        # config-dolphin-emu/dolphin-emu as a relative *symlink* to this
+        # very config folder on every launch (FileHelper.
+        # EnsureRelativeSymlink, from DolphinLaunchHelper.LaunchDolphin),
+        # and refuses to start if a real directory is sitting there:
+        #   "Should have created a symlink at '.../config-dolphin-emu/
+        #    dolphin-emu', but a directory already existed at this path!"
+        # Since that symlink resolves here anyway, this path reaches the
+        # bundled Dolphin all the same.
+        dolphin_app_id = DOLPHIN_APP_ID if backend == "wheelwizard" else app_id
+        dolphin_exe = None if backend == "wheelwizard" else exe
+        cfg_path = find_dolphin_config(dolphin_app_id, dolphin_exe) or \
+            dolphin_config_target(dolphin_app_id, dolphin_exe)
     elif backend == "eden":
         cfg_path = eden_config_target(app_id, exe)
     elif backend == "ryujinx":
