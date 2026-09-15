@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600;700&display=swap">
+  <style>
+    body { margin: 0; background: #121318;
+           font-family: "Noto Sans", "DejaVu Sans", system-ui, sans-serif;
+           -webkit-font-smoothing: antialiased; }
+    a { color: #E8BA52; } a:hover { color: #F0CE7E; }
+    .g { display: block; width: auto; }
+    .row { display: flex; align-items: center; }
+  </style>
+</helmet>
+<div style="width:760px;height:500px;box-sizing:border-box;background:#121318;padding:24px;filter: {{shade}}">
+      <div style="color:#E8E9EE;font-size:17px;font-weight:600;padding-bottom:2px">Xelu Controller Prompts</div>
+      <div style="color:#8C8F9B;font-size:12.5px;padding-bottom:14px">Switch set, 100px named</div>
+      
+    <div style="width:712px;height:288px;box-sizing:border-box;
+                background:color-mix(in srgb, #E85D5D 10%, #121318);
+                border:3px solid #E85D5D;border-radius:6px;
+                padding:12px 10px 8px;
+                display:flex;flex-direction:column;justify-content:space-between">
+      <div style="color:#E85D5D;font-weight:700;font-size:19px;line-height:1">P1</div>
+      <div>
+      <div class="row" style="gap:16px;justify-content:center;padding-bottom:12px"><img class="g" src="x_zl.png" style="height:36px" alt=""><img class="g" src="x_l.png" style="height:36px" alt=""><img class="g" src="x_minus.png" style="height:33px" alt=""><img class="g" src="x_plus.png" style="height:33px" alt=""><img class="g" src="x_r.png" style="height:36px" alt=""><img class="g" src="x_zr.png" style="height:36px" alt=""></div>
+      <div class="row" style="justify-content:space-between;padding:0 18px">
+        <span><img class="g" src="x_dpad.png" style="height:70px" alt=""></span>
+        <span class="row" style="gap:20px"><img class="g" src="x_stick.png" style="height:58px" alt=""><img class="g" src="x_stick.png" style="height:58px" alt=""></span>
+        <span style="position:relative;display:block;width:135px;height:110px">
+          <span style="position:absolute;left:47px;top:0"><img class="g" src="x_x.png" style="height:41px" alt=""></span>
+          <span style="position:absolute;left:0;top:36px"><img class="g" src="x_y.png" style="height:41px" alt=""></span>
+          <span style="position:absolute;left:94px;top:36px"><img class="g" src="x_a.png" style="height:41px" alt=""></span>
+          <span style="position:absolute;left:47px;top:71px"><img class="g" src="x_b.png" style="height:41px" alt=""></span>
+        </span>
+      </div></div>
+      <div style="text-align:center;color:#E8E9EE;font-size:14px">Xbox Series X|S Controller</div>
+    </div>
+      
+    <div class="row" style="width:712px;gap:26px;padding-top:14px">
+      <span class="row" style="gap:7px;font-size:14px;color:#8C8F9B"><img class="g" src="x_plus.png" style="height:34px" alt="">
+        <b style="color:#E85D5D">P1</b><span style="color:#E8E9EE;font-weight:600">hold to start</span></span>
+      <span class="row" style="gap:7px;font-size:14px;color:#8C8F9B"><img class="g" src="x_stick.png" style="height:34px" alt="">
+        <span style="color:#8C8F9B;font-weight:600">+</span><img class="g" src="x_stick.png" style="height:34px" alt=""><span>claim P1</span></span>
+      <span class="row" style="gap:7px;font-size:14px;color:#8C8F9B"><img class="g" src="x_l.png" style="height:34px" alt=""><img class="g" src="x_r.png" style="height:34px" alt=""><span>swap ABXY</span></span>
+      <span class="row" style="gap:7px;margin-left:auto;font-size:14px;color:#8C8F9B"><img class="g" src="x_minus.png" style="height:34px" alt="">
+        <b style="color:#E85D5D">P1</b><span>hold to quit</span></span>
+    </div></div>
+</x-dc>
+<script data-dc-script data-props='{"dim":{"editor":"boolean","default":false}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { shade: this.props.dim ? "brightness(0.4) saturate(0.55)" : "none" };
+  }
+}
+</script>
+</body>
+</html>

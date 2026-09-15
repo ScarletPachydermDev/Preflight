@@ -1,0 +1,107 @@
+{
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Chosen"
+    },
+    {
+      "id": "page-2",
+      "name": "Also considered"
+    }
+  ],
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 830
+    },
+    {
+      "file": "KenneyOutline.dc.html",
+      "x": 0,
+      "y": 970,
+      "w": 760,
+      "h": 500,
+      "page": "page-1"
+    },
+    {
+      "file": "Current.dc.html",
+      "x": 850,
+      "y": 970,
+      "w": 760,
+      "h": 500,
+      "page": "page-1"
+    },
+    {
+      "file": "Xelu256.dc.html",
+      "x": 1700,
+      "y": 970,
+      "w": 760,
+      "h": 500,
+      "page": "page-2"
+    },
+    {
+      "file": "Mix.dc.html",
+      "x": 0,
+      "y": 1610,
+      "w": 760,
+      "h": 500,
+      "page": "page-2"
+    },
+    {
+      "file": "EssentialMono.dc.html",
+      "x": 850,
+      "y": 1610,
+      "w": 760,
+      "h": 500,
+      "page": "page-2"
+    },
+    {
+      "file": "EssentialDuo.dc.html",
+      "x": 1700,
+      "y": 1610,
+      "w": 760,
+      "h": 500,
+      "page": "page-2"
+    },
+    {
+      "file": "KenneyDefault.dc.html",
+      "x": 0,
+      "y": 2250,
+      "w": 760,
+      "h": 500,
+      "page": "page-2"
+    },
+    {
+      "file": "Xelu100.dc.html",
+      "x": 850,
+      "y": 2250,
+      "w": 760,
+      "h": 500,
+      "page": "page-2"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "lighting",
+      "x": 0,
+      "y": -170,
+      "w": 620,
+      "page": "page-1",
+      "text": "CHOSEN: Kenney outline for the buttons, per-direction outline d-pads, and switch_stick_top_l/r for the sticks (which will move with the real axis values). The ring around ABXY is bright green when that pad's printed labels tell the truth and amber when ABXY is inverted \u2014 P4 here shows amber. It follows the OUTCOME, so a Nintendo-layout pad like the SF30 Pro goes green on the mirrored setting, not the default one; layout is read from the kernel device name RealWatcher recovers, since under Steam Input every pad claims to be a Valve pad.\n\nKenney outline, throughout. Its art is pure #FFFFFF, and SDL's colour modulation multiplies \u2014 so white takes any colour exactly. These can light in a player's colour and dim when a pad sleeps, which the shaded sets could not. Preflight lights a button on press and dims a sleeping bay by recolouring the shape it drew. SDL's colour modulation can only DARKEN an image \u2014 so a flat single-colour set (Essential Mono, Xelu) can still be tinted per player, while a set with baked-in fills (Kenney, Essential Duo) would look identical pressed or not.\n\nFlip the 'dim' tweak on any artboard to see the asleep state."
+    },
+    {
+      "id": "licences",
+      "x": 700,
+      "y": -170,
+      "w": 560,
+      "page": "page-1",
+      "text": "Kenney \u2014 CC0, SVG vector.\nXelu \u2014 CC0, 100px PNG (256px export also in the pack).\nEssential \u2014 CC BY 4.0, SVG vector: shipping it means crediting Gioele Casazza in the README and keeping the licence file."
+    }
+  ],
+  "launch": {
+    "view": "canvas",
+    "page": "page-1"
+  }
+}
