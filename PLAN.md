@@ -397,6 +397,20 @@ which is a nasty way to fail: check for output, never for the exit code.
     and `prepare_command()` launches Eden with the same, so both sides agree
     by construction. Pads are matched between the two views by MAC, and a
     Steam virtual pad by its GUID, which carries a unique name-CRC.
+  * **The flatpak (`dev.eden_emu.eden`) works too, verified 2026-09-15** on
+    Rhythm Heaven, and needed one fix rather than a new backend. Its config
+    lands at `~/.var/app/dev.eden_emu.eden/config/eden/qt-config.ini`, which
+    `eden_config_target()` already resolved, and it ships **no SDL of its
+    own**: unlike the AppImage's static SDL 2.33 it links the KDE runtime's
+    **2.32**, the version that hides Steam's virtual pads — behind a sandbox
+    that strips the environment. Exactly the Dolphin trap.
+
+    `prepare_command()` had an `eden` branch that added `SDL_JOYSTICK_HIDAPI=0`
+    and returned before the virtual-pad hint was reached, so under Steam Input
+    the flatpak would have seen no pads at all. It is now a `BACKEND_ENV`
+    table, so a backend's whole environment is one entry and no branch can
+    return early past half of it. Its `filesystems=host:ro` and
+    `devices=input` mean SD-card ROMs and controllers need no override.
   * **UNRESOLVED: Eden gets no input with Steam Input OFF.** It works with
     Steam Input on, which is the configuration in use, so this was parked
     2026-09-11 rather than solved. What was established, so a future attempt

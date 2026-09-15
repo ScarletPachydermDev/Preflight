@@ -43,7 +43,7 @@ players wait while you work out whose controller is which and inputs work.
 | **Ryubing (Ryujinx)** | flatpak, AppImage, tar | all four players' bindings, as Pro Controllers |
 | **Dolphin** | flatpak | GameCube pads 1–4, and the ports they plug into |
 | **Wheel Wizard** | Flatpak, native Linux build | writes Dolphin's GameCube pads before Wheel Wizard launches it |
-| **Eden** | AppImage | all four players' bindings, as Pro Controllers — needs Steam Input **on** |
+| **Eden** | flatpak, AppImage | all four players' bindings, as Pro Controllers — needs Steam Input **on** |
 
 Ryubing **Canary** works as well as stable — it ships SDL3 where stable ships
 SDL2, and Preflight reads either. Both share `~/.config/Ryujinx` unless you use
@@ -194,6 +194,11 @@ the Play button silently does nothing, which a Steam restart clears.
 
 `shot.py` renders the check screen to a PNG instead of the TV, which is how
 a layout change gets checked: `./shot.py out.png --pads 4`.
+
+`tools/steam-shortcut.py` lists Steam's non-Steam shortcuts and can put a
+launcher in front of one, reading and rewriting `shortcuts.vdf` in place with a
+byte-identical round-trip check and a timestamped backup. Useful when checking
+what a shortcut actually runs; SelfSteam is what creates them normally.
 
 `phase0.py` is a standalone diagnostic that prints every controller the system
 can see, how the emulator will identify it, and whether Steam is intercepting.

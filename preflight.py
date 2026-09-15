@@ -2658,35 +2658,42 @@ def message_screen(ui, title, lines, color=BAD):
 VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 
 
-def prepare_command(cmd, backend):
-    """Make sure Dolphin can see Steam's virtual pads.
+# What each backend needs in its environment on the far side. All of it is
+# about SDL 2.32 and newer, which hide Steam's virtual pads from any process
+# Steam did not launch — and a flatpak sandbox strips the environment that
+# would say otherwise, so `flatpak run --env=` is the only channel across.
+BACKEND_ENV = {
+    "dolphin": (VIRTUAL_PAD_HINT,),
+    "wheelwizard": (VIRTUAL_PAD_HINT,),
+    # Eden needs the pad hint AND the driver pinned: pinned so the ids and
+    # ports preflight just wrote are the ones it computes, since the same pad
+    # enumerates in a different order with a different guid otherwise.
+    #
+    # The hint matters for its flatpak in particular. The AppImage links SDL
+    # statically and inherits our environment, but the flatpak uses the KDE
+    # runtime's SDL 2.32 behind a sandbox — the Dolphin situation exactly, and
+    # it cost an evening there.
+    "eden": (VIRTUAL_PAD_HINT, EDEN_NO_HIDAPI),
+}
 
-    Its SDL is 2.32, which hides them from any process Steam did not launch,
-    and a flatpak sandbox strips the environment that would say otherwise.
-    Dolphin's own [SDL_Hints] section is applied too late to help. `flatpak
-    run --env=` is the one channel that crosses the sandbox, so we add it to
-    the command we were handed rather than hoping the config is enough.
+
+def prepare_command(cmd, backend):
+    """Add whatever the backend needs to see the controllers we set up.
+
+    Logged by launch(), because it is not the command the shortcut passed in.
     """
-    if backend == "eden" and cmd:
-        # Pin the driver Eden's SDL uses, so the ids and ports we just wrote
-        # are the ones it computes. Without this the same pad enumerates in a
-        # different order with a different guid and nothing matches.
-        key, _, value = EDEN_NO_HIDAPI.partition("=")
-        if os.path.basename(cmd[0]) == "flatpak" and len(cmd) > 1 and cmd[1] == "run":
-            if not any(a.startswith(f"--env={key}") for a in cmd):
-                cmd = cmd[:2] + [f"--env={EDEN_NO_HIDAPI}"] + cmd[2:]
-        else:
-            os.environ[key] = value
-        return cmd
-    if backend not in ("dolphin", "wheelwizard") or not cmd:
+    wanted = BACKEND_ENV.get(backend)
+    if not wanted or not cmd:
         return cmd
     if os.path.basename(cmd[0]) == "flatpak" and len(cmd) > 1 and cmd[1] == "run":
-        if any(a.startswith("--env=SDL_GAMECONTROLLER_ALLOW_STEAM") for a in cmd):
-            return cmd
-        return cmd[:2] + [f"--env={VIRTUAL_PAD_HINT}"] + cmd[2:]
+        add = [f"--env={entry}" for entry in wanted
+               if not any(a.startswith("--env=" + entry.partition("=")[0])
+                          for a in cmd)]
+        return cmd[:2] + add + cmd[2:]
     # A native or AppImage build inherits our environment directly.
-    key, _, value = VIRTUAL_PAD_HINT.partition("=")
-    os.environ[key] = value
+    for entry in wanted:
+        key, _, value = entry.partition("=")
+        os.environ[key] = value
     return cmd
 
 
