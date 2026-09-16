@@ -231,9 +231,9 @@ started fine and the problem is elsewhere. If there is no entry at all, Steam
 never launched it — Steam sometimes believes a shortcut is still running and
 the Play button silently does nothing, which a Steam restart clears.
 
-`tools/stage-art.py` rebuilds the button glyphs — the GameCube set from
-Zacksly's pack and the layout mock-up, and two derived layers for the Switch
-set from the art already committed. It is safe to run twice.
+`tools/stage-art.py` rebuilds the button glyphs from Kenney's pack: the
+GameCube set, and two derived layers for the Switch set from the art already
+committed. It is safe to run twice.
 
 `shot.py` renders the check screen to a PNG instead of the TV, which is how
 a layout change gets checked: `./shot.py out.png --pads 4`. It can draw either
@@ -270,13 +270,8 @@ Run it if something looks wrong and you want the full picture.
 
 ## Credits
 
-Button art by two people who made theirs free to use, and the icons are the
-reason the check screen reads from across a room:
-
-- **Switch-style glyphs** — [Kenney](https://kenney.nl), *Input Prompts*, CC0.
-- **GameCube glyphs** — [Zacksly](https://zacksly.itch.io), *GameCube Button
-  Icons and Controls*, [CC BY 3.0](http://creativecommons.org/licenses/by/3.0/).
-  Modified: converted to RGBA, and X turned on its end with its letter left
-  upright (see `tools/stage-gc-art.py`).
+Button art is [Kenney](https://kenney.nl)'s *Input Prompts* (CC0) throughout,
+Switch and GameCube both — one hand at one weight is why the two maps read as
+the same screen, and why they are legible from a sofa at all.
 
 Built with [Claude Code](https://claude.com/claude-code).

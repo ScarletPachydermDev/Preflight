@@ -1,75 +1,84 @@
 #!/usr/bin/env python3
 """Stage the button glyphs preflight draws, for both maps.
 
-The pack is not vendored — only the handful of files preflight draws, under
-the names the code asks for. Run it again with the pack unzipped somewhere
-to rebuild them:
+Everything comes from one pack — Kenney's Input Prompts, CC0 — so the two
+maps are the same hand at the same weight, and the only thing that differs
+between them is which console's buttons are drawn. Run it again with the pack
+unzipped somewhere to rebuild:
 
-    ./tools/stage-art.py "~/Downloads/GameCube Button Icons and Controls" \\
-                         "~/Downloads/green gc.png"
+    ./tools/stage-art.py "~/Claude/selfsteam assets/inputs/kenney_input-prompts_1.5"
 
-Two things happen on the way in, and both count as modifications under
-CC BY 3.0, so they are stated here and in art/gc/LICENSE-zacksly.txt:
+Only the files preflight draws are staged, under the names the code asks for.
+Three things are derived rather than copied, and each earns its keep:
 
-  * the pack ships palette and RGB PNGs; preflight's loader takes RGBA only,
-    so everything is converted;
-  * A, B, X and Y are built from the layout mock-up rather than straight
-    from the pack: the mock-up's blobs are the pack's own shapes, but scaled
-    the way the layout wants them and with X already stood on its end. Each
-    one gets the pack's letter dropped back in UPRIGHT and centred on the
-    blob's own middle — the pack draws the labels off to one side to suit the
-    tilt of a real pad, which reads as a mistake once the blobs are drawn
-    square. The filled twin is rebuilt the same way, so a press knocks the
-    letter out of exactly where the letter is.
+  * `<n>_letter` — a face button's label on its own, so the outline round it
+    can turn green or amber while the label stays white.
+  * `<n>_press` — the filled twin with its label hole closed, drawn UNDER
+    the outline so the colour runs uniformly up to a full-width edge.
+  * `dpad_<direction>` — the pack draws a pressed arm in red on a white
+    cross; the arm alone is kept, so a press lights that arm rather than the
+    whole d-pad.
 
-Idle glyphs come from Buttons Outline; the `_on` twins come from Buttons
-Full Solid, whose letter is knocked out of the silhouette — that is what
-makes a press read as the player's colour with the label showing through it.
+A face button's line is also thinned or thickened on the way in, so that every
+outline on screen comes out the SAME WEIGHT however big its button is. A line
+scales with the box it is drawn in, and the GameCube map draws A half again as
+large as anything in the top row and B smaller than it — so one 6px line in
+the file became 6.5px on A and 3.5px on B. The correction is read out of
+preflight's own layout rather than guessed, so re-run this after changing it.
 
-The Switch set in art/ needs no pack: its face buttons are already the right
-shapes, and what is derived from them here are the two extra layers both maps
-draw — `<n>_letter` so a label can stay white while the outline round it
-turns green or amber, and `<n>_press` so a press fills the button from inside
-without painting over that outline. Both are written from the committed art,
-so running this twice is harmless.
+Everything is repainted white on the way in, because preflight tints what it
+draws and SDL's colour modulation can only darken. The C stick is the one
+exception: it keeps Kenney's yellow, and preflight knows not to tint it.
 """
 
 import os
+import shutil
 import sys
 
 from PIL import Image, ImageChops, ImageFilter
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(HERE, "art", "gc")
-RES = "256w"
+SWITCH_DIR = os.path.join(HERE, "art")
+GC_DIR = os.path.join(SWITCH_DIR, "gc")
+GC_PACK = os.path.join("Nintendo Gamecube", "Double")
 
-# preflight's name -> the pack's file name.
-# The mock-up the face buttons come from, and where each blob sits in it.
-# Keyed by which corner of the cluster it is, since the file is one picture
-# of all four: A is the biggest, then X, Y, B by area.
-MOCKUP = "green gc.png"
-FACES = {"a": "A", "b": "B", "x": "X", "y": "Y"}
-ROTATED = ("x",)                 # stood on its end in the mock-up
-
-OUTLINE = {
-    "z": "Right Bumper",          # the Z pill, not a bumper on this pad
-    "l": "L Analog", "r": "R Analog",   # GameCube's shoulders are analog
-    "start": "Start Pause",
-    "dpad": "D-Pad",
-    "dpad_up": "D-Pad Up", "dpad_down": "D-Pad Down",
-    "dpad_left": "D-Pad Left", "dpad_right": "D-Pad Right",
-    "stick_l": "Control Stick", "stick_r": "C Stick",
+# A face button, or anything else with a label inside an outline: staged as
+# the outline, its label, and a press that fits within the outline.
+GC_LABELLED = {
+    "a": "button_a", "b": "button_b",
+    # Tilted, because a GameCube's X and Y sit at an angle beside A.
+    "x": "button_x_tilted", "y": "button_y_tilted",
 }
-# Only the ones a player can press get a filled twin. The d-pad's pressed
-# arm is already part of its directional art, and a stick is not a label.
-PRESSED = ("z", "l", "r", "start")
+# Outline plus a filled twin at the same size, which is all a control needs
+# when nothing recolours its outline.
+GC_PAIRS = {
+    "z": "button_z",
+    "l": "trigger_l", "r": "trigger_r",     # analog on this pad
+}
+# Taken as they are.
+GC_PLAIN = {
+    "dpad": "dpad",
+    "stick_l": "stick_grip_top",
+}
+# Turned a few degrees on the way in, clockwise, about the ink's own centre.
+# Kenney's tilted X leans its top toward A; this stands it up a little
+# further. The BLOB turns and the label does not — a tilted letter reads as a
+# mistake, which is the whole reason the pack's untilted glyphs were passed
+# over in the first place.
+GC_TILT = {"x": -8}
+
+# Kept in the pack's own colour — see the note about the C stick above.
+GC_COLOURED = {"stick_r": "stick_c_color_top"}
+GC_ARMS = ("dpad_up", "dpad_down", "dpad_left", "dpad_right")
+
+SWITCH_FACES = ("a", "b", "x", "y")
 
 
 def components(mask):
     """Connected runs of ink in an alpha channel, largest first.
 
-    The pack draws each glyph as a shape plus a separate letter, so this is
-    what separates the two: the shape is always the biggest piece.
+    Kenney draws a glyph as a shape plus a separate label, so this is what
+    separates the two: the shape is always the biggest piece.
     """
     w, h = mask.size
     a = mask.load()
@@ -94,14 +103,23 @@ def components(mask):
     return sorted(out, key=len, reverse=True)
 
 
+def white(im):
+    """Ink repainted pure white, alpha kept.
+
+    Everything preflight draws is white, because SDL's colour modulation can
+    only darken: white is the only ink that can become any colour.
+    """
+    out = Image.new("RGBA", im.size, (255, 255, 255, 0))
+    out.putalpha(im.getchannel("A"))
+    return out
+
+
 def split_letter(im):
     """(shape, letter) — the glyph with its label erased, and the label alone.
 
-    The letter's own component is grown by a couple of pixels before it is
-    cut out, because the pack's art is antialiased: the faint edge left by
-    an exact cut showed up as a ghost of the old letter once the shape was
-    turned. The letter keeps the full canvas, so pasting it back unmoved
-    lands it where it started.
+    The label's own component is grown by a couple of pixels before it is cut
+    out, because the art is antialiased: the faint edge left by an exact cut
+    showed up as a ghost of the label once the shape was recoloured.
     """
     alpha = im.getchannel("A")
     parts = components(alpha)
@@ -119,14 +137,11 @@ def split_letter(im):
 
 
 def fill_holes(im):
-    """(closed, letter) — the silhouette with its knockout filled in, and the
-    knockout on its own as a mask.
+    """The silhouette with its knocked-out label filled in.
 
-    A filled glyph wears its label as a hole rather than as ink, so this is
-    how the label is recovered from one. Anything transparent the canvas edge
-    cannot reach is inside the silhouette, which on this pack means the letter
-    and nothing else. The hole is grown before it is filled, for the same
-    antialiasing reason as split_letter.
+    A filled glyph wears its label as a hole. The label is drawn back on top
+    in white now, so the hole is closed first — left in, it showed as a dark
+    label-shaped halo around the white one.
     """
     alpha = im.getchannel("A")
     hole = alpha.point(lambda v: 255 if v < 128 else 0)
@@ -137,112 +152,13 @@ def fill_holes(im):
     grown = core.filter(ImageFilter.MaxFilter(5))
     out = im.copy()
     out.putalpha(ImageChops.lighter(alpha, grown))
-    letter = ImageChops.multiply(ImageChops.invert(alpha), grown)
-    return out, letter
-
-
-def centre_on(shape, letter):
-    """Put the letter in the middle of the shape it labels.
-
-    Centred on the shape's bounding box, not its centre of mass: these blobs
-    lean, and the eye reads the box.
-    """
-    sb, lb = shape.getchannel("A").getbbox(), letter.getchannel("A").getbbox()
-    patch = letter.crop(lb)
-    x = (sb[0] + sb[2] - patch.width) // 2
-    y = (sb[1] + sb[3] - patch.height) // 2
-    out = Image.new("RGBA", shape.size, (255, 255, 255, 0))
-    out.paste(patch, (x, y))
     return out
-
-
-def start_button(im, inset=1.0):
-    """Start's round button alone, centred and scaled like a lettered glyph.
-
-    The caption is a separate piece of ink above the circle, and the circle
-    is always the biggest piece, so this is just "keep the largest part".
-    """
-    parts = components(im.getchannel("A"))
-    keep = Image.new("RGBA", im.size, (255, 255, 255, 0))
-    for x, y in parts[0]:
-        keep.putpixel((x, y), im.getpixel((x, y)))
-    box = keep.getchannel("A").getbbox()
-    side = im.size[0]
-    # 0.70 of the canvas, the share the lettered glyphs' ink takes up. The
-    # filled twin comes in further, so a press shows as a disc inside the
-    # ring rather than as the same circle very slightly larger.
-    want = int(round(side * 0.70 * inset))
-    patch = keep.crop(box).resize((want, want), Image.LANCZOS)
-    out = Image.new("RGBA", im.size, (255, 255, 255, 0))
-    out.paste(patch, ((side - want) // 2, (side - want) // 2))
-    return out
-
-
-def mockup_blobs(path):
-    """The mock-up's four blobs, keyed the way FACES is.
-
-    The file is one picture of the whole cluster, drawn in green with faint
-    labels of its own. Only the four outlines are wanted: they are the four
-    biggest pieces of ink, and the labels are dropped in favour of the pack's
-    crisper ones.
-    """
-    im = Image.open(path).convert("RGBA")
-    parts = components(im.getchannel("A"))
-    out = {}
-    for pts in parts[:len(FACES)]:
-        piece = Image.new("RGBA", im.size, (255, 255, 255, 0))
-        for x, y in pts:
-            piece.putpixel((x, y), im.getpixel((x, y)))
-        out[len(pts)] = piece
-    # Biggest first is A, then X, Y, B — by area of ink, which is stable
-    # across a recolour and does not care where the file puts them.
-    order = sorted(out, reverse=True)
-    blobs = dict(zip(("a", "x", "y", "b"), (out[n] for n in order)))
-    # One line weight for all four, set by whichever was drawn finest.
-    finest = min(stroke_erosions(b) for b in blobs.values())
-    return {k: thin_to(v, finest) for k, v in blobs.items()}
-
-
-def interior(shape):
-    """The blob's own middle: the centroid of the area its outline encloses.
-
-    Not the bounding box — these shapes lean and bulge, and a letter centred
-    on the box of the X blob ends up visibly to one side of the hole it is
-    meant to sit in.
-    """
-    a = shape.getchannel("A")
-    w, h = a.size
-    ink = a.load()
-    # Flood the transparent background inward from the edge; whatever
-    # transparency it cannot reach is inside the outline.
-    outside = bytearray(w * h)
-    stack = [(x, y) for x in range(w) for y in (0, h - 1)]
-    stack += [(x, y) for y in range(h) for x in (0, w - 1)]
-    stack = [p for p in stack if ink[p] < 128]
-    for p in stack:
-        outside[p[1] * w + p[0]] = 1
-    while stack:
-        x, y = stack.pop()
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            nx, ny = x + dx, y + dy
-            if (0 <= nx < w and 0 <= ny < h and not outside[ny * w + nx]
-                    and ink[nx, ny] < 128):
-                outside[ny * w + nx] = 1
-                stack.append((nx, ny))
-    pts = [(x, y) for y in range(h) for x in range(w)
-           if ink[x, y] < 128 and not outside[y * w + x]]
-    if not pts:
-        bb = a.getbbox()
-        return (bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2
-    return (sum(p[0] for p in pts) / len(pts),
-            sum(p[1] for p in pts) / len(pts))
 
 
 def stroke_erosions(im):
     """How many erosions a shape survives — half its stroke width, in effect.
 
-    Used to compare one blob's line weight with another's without having to
-    find a centreline: a ring twice as thick takes twice as many.
+    Measures the THICKEST part of the ink, since that is the last to go.
     """
     m = im.getchannel("A").point(lambda v: 255 if v >= 128 else 0)
     n = 0
@@ -252,211 +168,211 @@ def stroke_erosions(im):
     return n
 
 
-def thin_to(im, target):
-    """Erode a blob's outline until it is as fine as `target` erosions.
+def turn(im, degrees):
+    """Rotate a glyph about its ink's own centre, so it does not wander.
 
-    The mock-up draws A with a noticeably heavier line than B, X and Y — 17
-    pixels against 11 — which is plain to see once the four sit side by side.
-    Eroding takes a pixel off the outside and a pixel off the inside at once,
-    so the line thins about its own middle and the blob keeps its shape.
+    Rotating about the canvas centre would shift a glyph whose ink is off
+    centre; these all have margin to spare, so a few degrees never clips.
     """
-    out = im
-    for _ in range(max(0, stroke_erosions(im) - target)):
-        out = out.filter(ImageFilter.MinFilter(3))
-    return out
+    if not degrees:
+        return im
+    bb = im.getchannel("A").getbbox()
+    centre = ((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2)
+    return im.rotate(degrees, Image.BICUBIC, center=centre)
 
 
-def tight(im):
-    """The image cropped to its ink."""
-    return im.crop(im.getchannel("A").getbbox())
+def press_from(filled):
+    """A press: the filled glyph, with its label hole closed.
 
-
-def white(im):
-    """Ink repainted pure white, alpha kept.
-
-    Everything preflight draws is white so SDL's colour modulation can tint
-    it — the mock-up arrives already green, which would only ever tint to a
-    darker green.
+    Nothing is eroded. The press is drawn UNDER the outline, so the outline
+    paints its own edge at full width and the colour runs uniformly up to it.
+    Eroding the fill to sit inside the outline instead — which is what this
+    did first — could only trade a dark ring inside every pressed button for
+    an outline drawn half its proper weight.
     """
+    return fill_holes(filled)
+
+
+def start_button(im, inset=1.0):
+    """Start's round button alone, centred and scaled like a lettered glyph.
+
+    Kenney draws START above the button. There is no room for that lettering
+    at the size the map draws it, and the label beside it in the legend
+    already says what holding it does — so the caption goes and the button is
+    blown up to sit at the same weight as the glyphs around it.
+    """
+    parts = components(im.getchannel("A"))
+    keep = Image.new("RGBA", im.size, (255, 255, 255, 0))
+    for x, y in parts[0]:
+        keep.putpixel((x, y), im.getpixel((x, y)))
+    box = keep.getchannel("A").getbbox()
+    side = im.size[0]
+    want = int(round(side * 0.70 * inset))
+    patch = keep.crop(box).resize((want, want), Image.LANCZOS)
     out = Image.new("RGBA", im.size, (255, 255, 255, 0))
-    out.putalpha(im.getchannel("A"))
+    out.paste(patch, ((side - want) // 2, (side - want) // 2))
     return out
 
 
-FILL_GAP = 5                    # canvas pixels between a press and its ring
+def arm_only(im):
+    """The pressed arm of a d-pad, on its own and in white.
 
-
-def solid_from(shape, gap):
-    """A press, cut from the blob's own outline rather than from other art.
-
-    The pack's filled glyphs are a different shape from the mock-up's blobs —
-    the mock-up scaled X and Y unevenly — so stretching one onto the other
-    left the fill visibly out of true with the ring around it. Filling the
-    blob's own interior and then eroding it cannot go out of true: every
-    point of the result is the same distance inside the line that encircles
-    it, whatever shape that line happens to be.
+    The pack draws it in red on a white cross. Keeping the whole cross would
+    light the whole d-pad when one direction is pressed; keeping the arm lets
+    a press show where it happened, and a diagonal show both arms for free.
     """
-    a = shape.getchannel("A").point(lambda v: 255 if v >= 128 else 0)
-    w, h = a.size
-    ink = a.load()
-    outside = bytearray(w * h)
-    stack = [(x, y) for x in range(w) for y in (0, h - 1)]
-    stack += [(x, y) for y in range(h) for x in (0, w - 1)]
-    stack = [q for q in stack if ink[q] < 128]
-    for q in stack:
-        outside[q[1] * w + q[0]] = 1
-    while stack:
-        x, y = stack.pop()
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            nx, ny = x + dx, y + dy
-            if (0 <= nx < w and 0 <= ny < h and not outside[ny * w + nx]
-                    and ink[nx, ny] < 128):
-                outside[ny * w + nx] = 1
-                stack.append((nx, ny))
-    full = Image.new("L", (w, h), 0)
-    fp = full.load()
+    px = im.load()
+    w, h = im.size
+    out = Image.new("RGBA", im.size, (255, 255, 255, 0))
     for y in range(h):
         for x in range(w):
-            if ink[x, y] >= 128 or not outside[y * w + x]:
-                fp[x, y] = 255
-    # In from the outer edge by the line's own width plus the gap, so the
-    # wysiwyg colour shows all the way round a press.
-    for _ in range(stroke_erosions(shape) * 2 + gap):
-        full = full.filter(ImageFilter.MinFilter(3))
-    out = Image.new("RGBA", (w, h), (255, 255, 255, 0))
-    # A touch of blur, or the eroded edge is a staircase.
-    out.putalpha(full.filter(ImageFilter.GaussianBlur(0.6)))
+            r, g, b, a = px[x, y]
+            if a > 40 and r > 150 and g < 120:
+                out.putpixel((x, y), (255, 255, 255, a))
     return out
 
 
-def face(blob, pack, key, canvas=256, fill=0.90):
-    """One face button, from the mock-up's blob and the pack's letter.
+def load(pack, name):
+    return Image.open(os.path.join(pack, GC_PACK,
+                                   "gamecube_" + name + ".png")).convert("RGBA")
 
-    The blob is scaled to `fill` of the canvas and centred. Its press is cut
-    from the blob itself, so the two are concentric by construction. The
-    letter is scaled uniformly, so it is never stretched, and placed on the
-    blob's interior centroid — the pack draws its labels off to one side to
-    suit the tilt of a real pad, which reads as a mistake once the blobs are
-    drawn square.
 
-    Returns (outline, filled, letter).
+def layout_weights():
+    """{name: how much thicker than the reference its line will be drawn}.
+
+    Read from preflight's own Layout, at whatever size, because the ratio
+    between two boxes does not depend on the window: the lanes and the
+    cluster's fit are all fractions of the strip's height.
     """
-    src = FACES[key]
-    _shape, letter = split_letter(load(pack, "Buttons Outline", src))
-    pack_ink = tight(load(pack, "Buttons Outline", src))
-    if key in ROTATED:
-        pack_ink = pack_ink.rotate(90, Image.BICUBIC, expand=True)
+    import importlib.util
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)      # preflight imports sdlui beside it
+    spec = importlib.util.spec_from_file_location(
+        "pf", os.path.join(HERE, "preflight.py"))
+    pf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pf)
 
-    blob = tight(white(blob))
-    scale = fill * canvas / max(blob.size)
-    bw = max(1, round(blob.width * scale))
-    bh = max(1, round(blob.height * scale))
-    out = Image.new("RGBA", (canvas, canvas), (255, 255, 255, 0))
-    out.paste(blob.resize((bw, bh), Image.LANCZOS),
-              ((canvas - bw) // 2, (canvas - bh) // 2))
+    class Bay:
+        dw = 1000.0
+        dh = 1000.0 / pf.PAD_ASPECT
+        ox = oy = 0.0
 
-    filled = solid_from(out, FILL_GAP)
+        def S(self, u):
+            return max(2.0, u * self.dh)
 
-    # The letter, undistorted, on the blob's own middle.
-    mark = tight(letter)
-    uniform = min(bw / pack_ink.width, bh / pack_ink.height)
-    mark = mark.resize((max(1, round(mark.width * uniform)),
-                        max(1, round(mark.height * uniform))), Image.LANCZOS)
-    cx, cy = interior(out)
-    stamped = Image.new("RGBA", (canvas, canvas), (255, 255, 255, 0))
-    stamped.paste(mark, (int(round(cx - mark.width / 2)),
-                         int(round(cy - mark.height / 2))))
+        def Y(self, v):
+            return self.oy + v * self.dh
 
-    out.alpha_composite(stamped)
-    return out, filled, stamped
+    lay = pf.Layout(Bay())
+    _centre, fit = pf.gc_cluster(lay)
+    # The top row is the reference: it is the most of what a player looks at,
+    # and both maps draw it at one size.
+    # A glyph stretched unevenly has a line that is not one width either, so
+    # the mean of the two is what gets matched.
+    return {name: (lay.fside * (sw + sh) / 2 * fit) / lay.top_box
+            for name, (_offset, (sw, sh)) in pf.GC_FACES.items()}
 
 
-SWITCH_FACES = ("a", "b", "x", "y")
-SWITCH_DIR = os.path.join(HERE, "art")
+def match_weight(im, factor, fine=4):
+    """Thin or thicken a glyph's line so it is drawn at the reference weight.
+
+    A line drawn `factor` times too thick needs to be that much thinner in
+    the file. Erosion takes a pixel off each side of it per pass, so the work
+    is done on a 4x copy: a pass there is a quarter of a pixel here, and at
+    whole-pixel granularity A overshot from 6px to 4px when it wanted 4.7.
+    """
+    have = stroke_erosions(im) * 2
+    if not have:
+        return im
+    delta = (have - have / factor) / 2          # per side, in real pixels
+    passes = int(round(delta * fine))
+    if not passes:
+        return im
+    big = im.resize((im.width * fine, im.height * fine), Image.LANCZOS)
+    for _ in range(abs(passes)):
+        big = big.filter(ImageFilter.MinFilter(3) if passes > 0
+                         else ImageFilter.MaxFilter(3))
+    return big.resize(im.size, Image.LANCZOS)
+
+
+def gamecube(pack):
+    """The GameCube set, from the pack."""
+    os.makedirs(GC_DIR, exist_ok=True)
+    count = 0
+    weights = layout_weights()
+    for key, src in GC_LABELLED.items():
+        outline = load(pack, src + "_outline")
+        filled = load(pack, src)
+        _shape, letter = split_letter(outline)
+        if letter is None:
+            sys.exit(f"{src}: expected a label inside the outline")
+        # The label is left alone: it is lettering, not a line, and reads as
+        # part of the button's size rather than as a weight.
+        ring, _ = split_letter(outline)
+        ring = match_weight(ring, weights.get(key, 1.0))
+        matched = turn(ring, GC_TILT.get(key, 0))
+        matched.alpha_composite(letter)
+        white(matched).save(os.path.join(GC_DIR, key + ".png"))
+        white(letter).save(os.path.join(GC_DIR, key + "_letter.png"))
+        turn(press_from(filled), GC_TILT.get(key, 0)).save(
+            os.path.join(GC_DIR, key + "_press.png"))
+        count += 3
+    for key, src in GC_PAIRS.items():
+        white(load(pack, src + "_outline")).save(
+            os.path.join(GC_DIR, key + ".png"))
+        white(load(pack, src)).save(os.path.join(GC_DIR, key + "_on.png"))
+        count += 2
+    for key, src in GC_PLAIN.items():
+        white(load(pack, src)).save(os.path.join(GC_DIR, key + ".png"))
+        count += 1
+    for key, src in GC_COLOURED.items():
+        load(pack, src).save(os.path.join(GC_DIR, key + ".png"))
+        count += 1
+    for key in GC_ARMS:
+        arm_only(load(pack, key)).save(os.path.join(GC_DIR, key + ".png"))
+        count += 1
+    # The outline for the idle button, the filled one for a press: taking
+    # both from the outline left a press looking like a smaller ring.
+    for name, src, inset in (("start_plain", "button_start_outline", 1.0),
+                             ("start_plain_on", "button_start", 0.82)):
+        start_button(white(load(pack, src)), inset).save(
+            os.path.join(GC_DIR, name + ".png"))
+        count += 1
+    return count
 
 
 def switch_faces():
     """The Switch set's two derived layers, from the art already committed.
 
-    Kenney's filled twin is exactly the same size as its outline, so drawing
-    it over a recoloured outline painted the colour out. `_press` is that
-    twin brought inside the line instead; `_letter` is the label on its own,
-    for drawing back in white on top of both.
+    Nothing is copied here: `a.png` and the rest are staged already, and what
+    they lack are the layers that let an outline be recoloured while its
+    label stays white. Derived from committed art, so running this twice is
+    harmless.
     """
     for key in SWITCH_FACES:
         outline = Image.open(os.path.join(SWITCH_DIR, key + ".png")).convert("RGBA")
         filled = Image.open(os.path.join(SWITCH_DIR, key + "_on.png")).convert("RGBA")
         _ring, letter = split_letter(outline)
         if letter is None:
-            sys.exit(f"art/{key}.png: expected a letter inside the outline")
+            sys.exit(f"art/{key}.png: expected a label inside the outline")
         letter.save(os.path.join(SWITCH_DIR, key + "_letter.png"))
-
-        # Kenney's filled twin wears its own label as a hole. The label goes
-        # on top in white now, so the hole is closed first — left in, it
-        # showed as a dark letter-shaped halo around the white one.
-        closed, _hole = fill_holes(filled)
-        # Measured off the RING alone: the whole glyph's thickest part is the
-        # letter, and eroding by that much left a crescent of fill around it
-        # rather than a filled button.
-        inside = closed.getchannel("A").point(lambda v: 255 if v >= 128 else 0)
-        for _ in range(stroke_erosions(_ring) * 2 + 3):
-            inside = inside.filter(ImageFilter.MinFilter(3))
-        press = Image.new("RGBA", filled.size, (255, 255, 255, 0))
-        press.putalpha(inside.filter(ImageFilter.GaussianBlur(0.6)))
-        press.save(os.path.join(SWITCH_DIR, key + "_press.png"))
-
-
-def load(pack, folder, name):
-    return Image.open(os.path.join(pack, folder, "White", RES,
-                                   name + ".png")).convert("RGBA")
+        press_from(filled).save(os.path.join(SWITCH_DIR, key + "_press.png"))
+    return 2 * len(SWITCH_FACES)
 
 
 def main():
-    if not 2 <= len(sys.argv) <= 3:
+    if len(sys.argv) != 2:
         sys.exit(__doc__)
     pack = os.path.expanduser(sys.argv[1])
-    mock = os.path.expanduser(sys.argv[2] if len(sys.argv) > 2
-                              else os.path.join("~/Downloads", MOCKUP))
-    os.makedirs(OUT, exist_ok=True)
-
-    for name, src in OUTLINE.items():
-        load(pack, "Buttons Outline", src).save(os.path.join(OUT, name + ".png"))
-    for name in PRESSED:
-        load(pack, "Buttons Full Solid", OUTLINE[name]).save(
-            os.path.join(OUT, name + "_on.png"))
-
-    # The legend has no room for Start's own START/PAUSE caption, so it gets
-    # the button on its own, blown up to sit at the same weight as the
-    # lettered glyphs beside it. The map keeps the captioned version.
-    for folder, name, inset in (("Buttons Outline", "start_plain", 1.0),
-                                ("Buttons Full Solid", "start_plain_on",
-                                 0.82)):
-        start_button(load(pack, folder, "Start Pause"), inset).save(
-            os.path.join(OUT, name + ".png"))
-
-    # The face buttons, from the mock-up's blobs.
-    blobs = mockup_blobs(mock)
-    for key in FACES:
-        outline, filled, mark = face(blobs[key], pack, key)
-        outline.save(os.path.join(OUT, key + ".png"))
-        filled.save(os.path.join(OUT, key + "_press.png"))
-        mark.save(os.path.join(OUT, key + "_letter.png"))
-
-    switch_faces()
-
-    for src, dst in (("LICENSE.txt", "LICENSE-zacksly.txt"),):
-        with open(os.path.join(pack, src), encoding="utf-8", errors="replace") as fh:
-            body = fh.read()
-        with open(os.path.join(OUT, dst), "w", encoding="utf-8") as fh:
-            fh.write(body)
-            fh.write("\n\n" + "-" * 90 + "\n\n"
-                     "Modified for preflight: converted to RGBA, and X.png "
-                     "rotated a quarter turn so it stands on its end as it "
-                     "does on a real GameCube pad. See tools/stage-gc-art.py.\n")
-
-    print(f"staged {len(OUTLINE) + len(PRESSED) + 3 * len(FACES) + 3} files "
-          f"into {OUT}, plus {2 * len(SWITCH_FACES)} derived in "
-          f"{SWITCH_DIR}")
+    licence = os.path.join(pack, "License.txt")
+    if not os.path.isdir(os.path.join(pack, GC_PACK)):
+        sys.exit(f"no {GC_PACK} in {pack}")
+    staged = gamecube(pack)
+    derived = switch_faces()
+    if os.path.isfile(licence):
+        shutil.copyfile(licence, os.path.join(SWITCH_DIR, "LICENSE-kenney.txt"))
+    print(f"staged {staged} files into {GC_DIR}, "
+          f"derived {derived} in {SWITCH_DIR}")
 
 
 if __name__ == "__main__":

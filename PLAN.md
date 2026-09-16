@@ -219,57 +219,60 @@ screen predicts the press in the game, which is the whole point of the screen.
 A physical pad's own layout is not drawn and never was: see the face-button
 note above.
 
-Three things about how it is built, each of which was learned by getting it
+Four things about how it is built, each of which was learned by getting it
 wrong first:
 
-* **The art is sized by its INK, not its canvas.** Zacksly's glyphs each carry
-  a different margin, so drawing them all in equal boxes threw the
-  proportions out. `GC_INK` holds the measured ink fraction per glyph, and
-  `GC_PSD` asks for ink sizes in the layout PSD's own pixels — a number in
-  that table can be checked against the picture it came from.
-* **The PSD sets the clusters; the lanes set the gaps.** Transcribing the
-  PSD's own spacing literally left everything small and the C stick touching
-  B, because those gaps were whatever suited a 3556-pixel canvas. So each
-  cluster keeps its internal geometry and the four are spread across the bay
-  with equal air, exactly as the Switch map does. The d-pad is the one size
-  NOT taken from the PSD: the two maps scale differently and the PSD's number
-  came out 13% smaller than the Switch map's, so the table carries the size
-  that matches on screen instead.
+* **Both maps are drawn from ONE pack** — Kenney's *Input Prompts*, CC0,
+  which has a GameCube section as well as a Switch one. Zacksly's GameCube
+  pack came first and was dropped for it on 2026-09-16: same artist means
+  identical stroke weights and canvases, and it retired a pile of machinery
+  that existed only to reconcile the two — blob-slicing out of a mock-up,
+  letter re-centring on interior centroids, stroke normalisation, rotating X
+  and standing its letter back up — along with a CC BY attribution. The
+  lesson for the next map: take the whole set from one hand.
+* **The layout file sets the cluster; the lanes set everything else.**
+  `GC_FACES` is all a map owns now — an offset from A and a (width, height)
+  per button, measured off `gc.psd`. Two things were learned the hard way
+  there. A size is a BOX, not ink, so each glyph keeps the shape Kenney drew
+  it at; and the width and height are kept SEPARATE, because that file
+  stretches X by 11% and that stretch is what stands it upright — averaging
+  the two into one number put the lean back and cost a round trip to work
+  out why. `gc_cluster` then grows the cluster until it meets the lane plus
+  its air, the gap up to the top row, or the bottom of the strip, whichever
+  comes first.
 * **A wysiwyg ring is the button's own outline, recoloured, on BOTH maps.**
   Not one of A, B, X, Y is a circle on a GameCube pad, so the annulus the
-  Switch map used had nothing to be concentric with. A grown copy of the
-  filled silhouette behind each button was tried and read as a second outline
-  fighting the first; painting the ink itself green or amber is exact. The
-  Switch map was brought onto the same footing once the same mock-up arrived
-  for it (2026-09-16), so `Bay.face` now draws both maps: outline in the
-  wysiwyg colour, a press filling it from inside that line, and the label
-  last in white.
+  Switch map used had nothing to be concentric with; painting the ink itself
+  green or amber is exact. `Bay.face` draws three layers from one glyph,
+  bottom up: the press fills the whole shape, the outline paints its edge in
+  the wysiwyg colour, the label goes on last in white.
+
+  **The press goes UNDERNEATH, and that is the whole trick.** Drawn on top it
+  has to be eroded to sit inside the outline, and there is no good amount:
+  eroded enough to clear the line it leaves a dark ring of background inside
+  every pressed button, eroded less it covers half the line's width. Under
+  it, nothing is eroded at all — the colour runs uniformly to a full-weight
+  edge — which also deleted the blur, the gap constant and the ring-thickness
+  measurement that existed only to serve them.
+
+  Two traps in deriving those layers, both hit: measure a ring's thickness on
+  the **ring alone**, since the thickest part of a glyph is its letter; and
+  **close the label's hole first**, because Kenney's filled art already has
+  one and it shows as a dark letter-shaped halo round the white one.
 
   The fill used to knock the label out of itself, for a negative. That reads
   well on a GameCube's big A and not at all on a Switch's small circles,
-  where Kenney's letter is nearly as wide as the room inside the ring and a
-  press came out as two crescents. Two traps in deriving those fills, both
-  hit: measure the ring's thickness on the **ring alone**, since the whole
-  glyph's thickest part is its letter; and **close the letter's hole first**,
-  because Kenney's filled art already has one and eroding it leaves a dark
-  letter-shaped halo round the white one.
-
-* **The face buttons come from the layout mock-up, and their presses are cut
-  from themselves.** `tools/stage-gc-art.py` slices the four blobs out of
-  `green gc.png`, repaints them white so they can tint, thins them all to
-  whichever was drawn finest (the mock-up gives A a 17px line against B's 11,
-  which is plain to see side by side), and drops the pack's letter back in
-  UPRIGHT on each blob's **interior centroid** — the pack draws its labels
-  off to one side to suit the tilt of a real pad, and the bounding-box centre
-  is not the visual centre of a shape that leans.
-
-  A press is the blob's own interior, eroded by the line's width plus a gap.
-  Deriving it from the pack's filled art instead was wrong twice over: the
-  mock-up scaled X and Y unevenly, so no single stretch nests one shape in
-  the other, and the result was visibly out of true exactly where the two
-  disagreed. Eroding cannot go out of true — every point of the result is the
-  same distance inside the line that encircles it, whatever shape that is.
-
+  where Kenney's letter is nearly as wide as the room inside the ring.
+* **Two things that looked like art problems were not.** Faces that read as
+  jagged were SDL2 point-sampling every scaled texture — nothing was setting
+  `SDL_RENDER_SCALE_QUALITY`, which defaults to nearest, and the face buttons
+  showed it worst because they are the one thing drawn LARGER than its
+  canvas. And outlines of visibly different weights were arithmetic: a line
+  scales with the box it is drawn in, so one 6px line came out 6.5px on A and
+  3.5px on B. `layout_weights()` reads the ratio out of `Layout` itself and
+  `match_weight` thins or thickens each glyph to match, on a 4x copy because
+  whole-pixel erosion overshot. Both fixes are global: every glyph on both
+  maps got sharper, not just the faces.
 * **L and R fill; they do not switch — and only on this map.** They are
   analog on this pad and Dolphin binds them to the analog triggers, so the
   filled glyph is drawn over the outline and clipped as the trigger goes

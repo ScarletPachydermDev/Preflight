@@ -328,6 +328,10 @@ def _bind(sdl, ttf):
     except AttributeError:
         pass
 
+    # Reading an axis directly, rather than waiting for an event about it.
+    sdl.SDL_GameControllerGetAxis.argtypes = [vp, ci]
+    sdl.SDL_GameControllerGetAxis.restype = ctypes.c_int16
+
     # The authoritative "is this pad still there?" query. A Bluetooth pad that
     # sleeps can linger in the joystick list, and rumble still reports success
     # on it, so this is the only reliable liveness signal.
@@ -366,6 +370,14 @@ class UI:
                     size, flags = (ww, hh), SDL_WINDOW_SHOWN
             except ValueError:
                 pass
+
+        # Smooth every scaled texture. SDL2 defaults this to nearest, which
+        # point-samples: a glyph drawn at any size other than its own came out
+        # with a staircase along the curves, worst on the face buttons because
+        # they are the one thing drawn LARGER than its canvas. Set before the
+        # renderer, because textures take their filter from it when they are
+        # created.
+        sdl.SDL_SetHint(b"SDL_RENDER_SCALE_QUALITY", b"1")
 
         self.window = sdl.SDL_CreateWindow(
             title.encode(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,

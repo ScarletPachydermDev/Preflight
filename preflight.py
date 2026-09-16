@@ -2258,7 +2258,12 @@ def hold_ring(ui, cx, cy, radius, fraction, color, track):
                        max(1.5, radius * 0.14), color if i < filled else track)
 
 
-PAD_ASPECT = 2.4        # a wide strip; the bays are much wider than they are tall
+# A wide strip, because the bays are much wider than they are tall. 3.2 and
+# not 2.4: at 2.4 the strip came out 727px inside a 1042px bay, so the lanes
+# were shoulder to shoulder with 8px of air while a third of the bay went
+# unused — and the GameCube cluster, which is the widest thing drawn, had
+# nowhere to grow into.
+PAD_ASPECT = 3.2
 
 
 class Bay:
@@ -2307,12 +2312,15 @@ class Bay:
     def face(self, name, cx, cy, w, h=None, pressed=False, wys=None):
         """A face button, in three layers.
 
-        The button's own outline carries the answer to "is this label telling
-        the truth" — green when it is, amber when it is not. A press fills the
-        button from inside that line, so the colour survives it, and the label
-        goes on last in white so it stays readable either way. All three
-        layers come from one glyph, so nothing can drift out of line with
-        anything else.
+        Three layers from one glyph, bottom up: the press fills the whole
+        shape, the outline paints its edge in the wysiwyg colour — green when
+        the label is telling the truth, amber when it is not — and the label
+        goes on last in white so it stays readable either way.
+
+        The press goes UNDERNEATH deliberately. Drawn on top it had to be
+        eroded to sit inside the outline, and that either left a dark ring of
+        background inside every pressed button or, eroded less, covered half
+        the outline's width.
 
         The fill used to knock the label out of itself, for a negative. It
         reads well on a GameCube's big A and not at all on a Switch's small
@@ -2323,11 +2331,11 @@ class Bay:
         label is left as part of the glyph.
         """
         h = w if h is None else h
+        if pressed:
+            self.glyph(name + "_press", cx, cy, w, h, color=self.lit)
         self.glyph(name, cx, cy, w, h,
                    color=None if wys is None else
                    (RING_OK if wys else RING_BAD))
-        if pressed:
-            self.glyph(name + "_press", cx, cy, w, h, color=self.lit)
         if wys is not None:
             self.glyph(name + "_letter", cx, cy, w, h, color=FG)
 
@@ -2392,6 +2400,8 @@ class Layout:
 
         self.row_y = g.Y(0.635)
         self.top_y = g.Y(0.085)
+        self.top_box = S(0.31)
+        self.floor = g.oy + g.dh
 
         # The top row hangs off the point midway BETWEEN THE STICKS, not the
         # middle of the strip. Those are not the same point — the face
@@ -2399,6 +2409,7 @@ class Layout:
         # centre — and a top row centred on the strip was visibly out of line
         # with everything under it. Scaled to whatever fits once it is
         # off-centre, keeping its own spacing.
+        self.air = air
         self.mid = (self.centres[1] + self.centres[2]) / 2
         reach = min(self.mid - g.ox, g.ox + g.dw - self.mid) - S(0.31) / 2
         self.fit = min(1.0, reach / S(1.02))
@@ -2483,66 +2494,70 @@ def _switch_controls(g, held, axes, swap, holds, wys):
               axes, ax, ay, name, on(btn))
 
 
-# The GameCube face cluster, transcribed from the layout PSD in that file's
-# own pixels — centre, then ink width and height. Only the cluster: where the
-# rows and lanes go is shared with the Switch map (see Layout), so the two
-# screens read as one tool. What is left here is the part that really is
-# different — four buttons of four sizes around a big A, rather than a
-# diamond of equal circles.
+# The GameCube face cluster: an offset from A and a size, both in units of
+# the shared face box. That is all a map needs to own now — the rows, the
+# lanes and everything else come from Layout — and expressing the size as a
+# box rather than as ink keeps each glyph at the shape Kenney drew it, since
+# the box scales and the ink inside it follows.
 #
-# Ink, not canvas: every glyph carries its own margin, and a different one
-# per glyph, so sizing by canvas would make a nonsense of the proportions.
-# GC_INK converts between the two, measured off the staged art.
-_GC_FACES_AS_DRAWN = {
-    "y": ((2710,  816), (207, 131)),
-    "a": ((2766, 1022), (232, 232)),
-    "x": ((2974,  972), (144, 220)),
-    "b": ((2556, 1132), (154, 154)),
+# Measured off gc.psd, whose four layers are the Kenney glyphs this map
+# draws, arranged the way a GameCube arranges them: a big A with B below and
+# left, X on its end to the right, Y lying across the top. B really is that
+# much smaller than A on the pad. Absolute scale is not read — gc_cluster
+# fits the cluster to the lane — so only these ratios matter.
+GC_FACES = {
+    #        offset from A      (width, height) of its box
+    "a": ((+0.00, +0.00), (1.00, 1.00)),
+    "b": ((-0.72, +0.36), (0.63, 0.63)),
+    # X is 11% taller than it is wide relative to the glyph: the layout file
+    # stretches it, and that stretch is what stands it upright. Averaging the
+    # two into one number left it leaning into A, which is what the pad's own
+    # X does and what the layout was drawn to fix.
+    "x": ((+0.69, -0.17), (0.83, 0.93)),
+    "y": ((-0.18, -0.68), (0.88, 0.89)),
 }
 
+# Everything preflight draws is white so it can be tinted — SDL's colour
+# modulation only darkens, so white is the only ink that can become any
+# colour. The C stick is the exception: it is yellow on the pad and yellow in
+# the pack, and tinting that by a player's colour turns it to mud. It keeps
+# its own colour and is dimmed rather than recoloured.
+SELF_COLOURED = {"gc/stick_r"}
 
-def gc_faces(table, bigger, spread):
-    """The face cluster scaled up, and pushed out from A to suit.
-
-    Bigger buttons need somewhere to be bigger into: at the mock-up's own
-    spacing a scaled-up A ends up five pixels from Y. So the four grow and
-    their distances from A grow with them, by less — the cluster keeps the
-    shape it was drawn as, and the gaps it was drawn with.
-    """
-    out = {}
-    ax, ay = table["a"][0]
-    for name, ((px, py), (iw, ih)) in table.items():
-        out[name] = ((ax + (px - ax) * spread, ay + (py - ay) * spread),
-                     (iw * bigger, ih * bigger))
-    return out
-
-
-GC_FACES = gc_faces(_GC_FACES_AS_DRAWN, bigger=1.10, spread=1.06)
-# How much of its canvas each glyph's ink takes up, measured off the staged
-# art and keyed the way the art is: no prefix for the Switch set, "gc/" for
-# the GameCube one. Only the glyphs that need it are here — a trigger, whose
-# fill is measured against its ink, and a shape whose box has to be worked
-# back from the ink the layout asked for.
-INK = {
-    "gc/l": (0.852, 0.555), "gc/r": (0.852, 0.555),
-    "gc/a": (0.898, 0.898), "gc/b": (0.898, 0.898),
-    "gc/x": (0.590, 0.898), "gc/y": (0.898, 0.570),
-}
+# How much of its canvas a glyph's ink takes up, for the few places that
+# measure against ink rather than the box it is drawn in. Keyed the way the
+# art is: no prefix for the Switch set, "gc/" for the GameCube one.
+INK = {"gc/l": (0.750, 0.688), "gc/r": (0.750, 0.688)}
 
 
 def gc_cluster(lay):
-    """(centre, scale) for the face cluster, fitted to the shared face lane.
+    """(centre, scale) for the face cluster, grown into the room it has.
 
-    The cluster is wider than it is tall and the lane is square, so width
-    decides. Centred on its own bounding box rather than on A, which sits off
-    to one side of it.
+    A GameCube's four buttons are spread wider and taller than the Switch
+    map's diamond, so fitting them inside a diamond-sized lane made every one
+    of them small. They get the lane plus most of the air beside it instead,
+    and are then held back by whichever runs out first: that width, the gap
+    up to the top row, or the bottom of the strip. Computed rather than
+    chosen, because the answer changes with every other number here.
     """
-    xs = [(px - iw / 2, px + iw / 2) for (px, _py), (iw, _ih) in GC_FACES.values()]
-    ys = [(py - ih / 2, py + ih / 2) for (_px, py), (_iw, ih) in GC_FACES.values()]
-    lo_x, hi_x = min(a for a, _b in xs), max(b for _a, b in xs)
-    lo_y, hi_y = min(a for a, _b in ys), max(b for _a, b in ys)
-    scale = min(2 * lay.freach / (hi_x - lo_x), 2 * lay.freach / (hi_y - lo_y))
-    return ((lo_x + hi_x) / 2, (lo_y + hi_y) / 2), scale
+    xs, ys = [], []
+    for (dx, dy), (sw, sh) in GC_FACES.values():
+        xs += [dx - sw / 2, dx + sw / 2]
+        ys += [dy - sh / 2, dy + sh / 2]
+    lo_x, hi_x, lo_y, hi_y = min(xs), max(xs), min(ys), max(ys)
+    centre = ((lo_x + hi_x) / 2, (lo_y + hi_y) / 2)
+
+    # Measured from the cluster's own centre, since that is what gets put on
+    # the row: half its span each way, not its distance from A. A reaches
+    # further down than up and Y further up than down, so measuring from A
+    # made the cluster look taller than it is and held it back.
+    across = (hi_x - lo_x) * lay.fside
+    half = (hi_y - lo_y) / 2 * lay.fside
+    gap = lay.S(0.04)
+    room_up = lay.row_y - (lay.top_y + lay.top_box / 2) - gap
+    room_down = lay.floor - lay.row_y
+    return centre, min((2 * lay.freach + 1.6 * lay.air) / across,
+                       room_up / half, room_down / half)
 
 
 def _gamecube_controls(g, held, axes, swap, holds, wys):
@@ -2590,12 +2605,11 @@ def _gamecube_controls(g, held, axes, swap, holds, wys):
     (anchor_x, anchor_y), scale = gc_cluster(lay)
     live = face_live(held, swap)
     for letter, name in (("A", "a"), ("B", "b"), ("X", "x"), ("Y", "y")):
-        (px, py), (iw, ih) = GC_FACES[name]
-        fx, fy = INK[g.art + name]
+        (dx, dy), (sw, sh) = GC_FACES[name]
         g.face(name,
-               lay.centres[3] + (px - anchor_x) * scale,
-               lay.row_y + (py - anchor_y) * scale,
-               iw * scale / fx, ih * scale / fy,
+               lay.centres[3] + (dx - anchor_x) * lay.fside * scale,
+               lay.row_y + (dy - anchor_y) * lay.fside * scale,
+               lay.fside * sw * scale, lay.fside * sh * scale,
                pressed=letter in live, wys=wys)
 
 
@@ -2628,8 +2642,13 @@ def stick(g, cx, cy, side, travel, axes, ax, ay, name, clicked):
     kx = (axes.get(ax, 0) / 32768.0) * travel
     ky = (axes.get(ay, 0) / 32768.0) * travel
     moved = abs(kx) + abs(ky) > 1.5
-    g.glyph(name, cx + kx, cy + ky, side,
-            color=g.lit if (moved or clicked) else g.resting)
+    if g.art + name in SELF_COLOURED:
+        # Dimmed rather than recoloured, since recolouring is what would
+        # ruin it. Movement still reads: the glyph moves.
+        tint = (255, 255, 255) if (moved or clicked) else (150, 150, 150)
+    else:
+        tint = g.lit if (moved or clicked) else g.resting
+    g.glyph(name, cx + kx, cy + ky, side, color=tint)
 
 
 def trigger(g, name, cx, cy, w, h, value):
@@ -2705,7 +2724,11 @@ def draw_hint(ui, hint):
 # stored as nothing at all and drew nothing, which looked like the trigger
 # being ignored until something else woke the screen up.
 STICK_DEADZONE = 6000
-AXIS_DEADZONE = {sdlui.AXIS_TRIGGERLEFT: 400, sdlui.AXIS_TRIGGERRIGHT: 400}
+# 2000, not 400: a Steam virtual pad's triggers sit at around 1200 at rest,
+# measured in a log, and a smaller number left a permanent sliver of fill on
+# a trigger nobody was touching. Still a fifteenth of the old 6000, so a
+# light squeeze registers.
+AXIS_DEADZONE = {sdlui.AXIS_TRIGGERLEFT: 2000, sdlui.AXIS_TRIGGERRIGHT: 2000}
 
 AXIS_NAMES = {0: "Left X", 1: "Left Y", 2: "Right X", 3: "Right Y",
               4: "Trigger L", 5: "Trigger R"}
@@ -2920,7 +2943,10 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
         # High in the bay, with the label well under it: at the old spacing
         # the lowest buttons very nearly touched the controller's name.
         top, under = 0.15, 0.13
-        pw, ph = int(cw * 0.92), int(ch * 0.62)
+        # 0.70 of the bay, not 0.62: raising the map left slack between it
+        # and the label, and a taller strip makes every glyph bigger on a
+        # screen being read from a sofa.
+        pw, ph = int(cw * 0.92), int(ch * 0.70)
         card_bg = blend(BG, col, 0.30 if buzzing else 0.10)
         draw_gamepad(ui, cx + (cw - pw) / 2, cy + ch * top, pw, ph, col,
                      pad.held if pad else set(), pad.axes if pad else {},
@@ -2998,6 +3024,33 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube"}
 # forth.
 GC_SWAP_ON = 24000
 GC_SWAP_OFF = 8000
+
+
+def read_axes(sdl, pads, logged):
+    """Read every axis straight from SDL, instead of waiting to be told.
+
+    Axis events do arrive, but not always before the first button press: a
+    Steam virtual pad logged nothing at all until one, so a trigger squeezed
+    before anything else was touched drew nothing and looked ignored. Reading
+    the state each frame does not depend on an event ever coming, and it is
+    six calls per pad on a screen that repaints only when something changes.
+
+    `logged` remembers which axes have been seen to move, so the log gets one
+    line per axis per run — enough to tell whether a control is arriving at
+    all, without a line per sample.
+    """
+    for pad in pads:
+        if not pad.handle:
+            continue
+        for axis in range(6):
+            value = sdl.SDL_GameControllerGetAxis(pad.handle, axis)
+            dead = AXIS_DEADZONE.get(axis, STICK_DEADZONE)
+            pad.axes[axis] = value if abs(value) > dead else 0
+            if abs(value) > dead and axis not in logged:
+                logged.add(axis)
+                print(f"axis: P{pad.slot or '-'} axis={axis} "
+                      f"({AXIS_NAMES.get(axis, '?')}) reached {value}",
+                      flush=True)
 
 
 def update_trigger_swap(pads, armed):
@@ -3267,6 +3320,7 @@ def main():
                 warnings.append("No controllers detected. Wake one and it "
                                 "will appear here.")
 
+            read_axes(sdl, pads, axes_logged)
             if update_trigger_swap(pads, armed):
                 remember(pads, known)
             if layout_for(backend) == "gamecube":
@@ -3323,21 +3377,6 @@ def main():
                         # The swap gesture disarms on its own, from the axis
                         # values: nothing to clear here for it.
                         holding.pop((p.key, btn), None)
-            elif kind == "axis":
-                inst, axis, value = payload
-                for p in pads:
-                    if p.instance_id == inst:
-                        dead = AXIS_DEADZONE.get(axis, STICK_DEADZONE)
-                        p.axes[axis] = value if abs(value) > dead else 0
-                        # Once per axis per run: enough to tell whether a
-                        # trigger is arriving at all, without a line per
-                        # sample. Same reason as the press log.
-                        if abs(value) > dead * 2 and axis not in axes_logged:
-                            axes_logged.add(axis)
-                            print(f"axis: P{p.slot or '-'} axis={axis} "
-                                  f"({AXIS_NAMES.get(axis, '?')}) "
-                                  f"reached {value}", flush=True)
-
             elif kind == "button":
                 inst, btn = payload
                 pad = next((p for p in pads if p.instance_id == inst), None)
