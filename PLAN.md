@@ -278,6 +278,14 @@ wrong first:
   meant the first fifth of the travel filled empty space — the button looked
   like it was ignoring a slow press.
 
+  **A trigger needs its own deadzone.** One 6000 was applied to every axis,
+  which is a stick's rule: a stick jitters around its centre and the screen
+  never settles without it, while a trigger rests at zero and stays there.
+  Under 6000 the value was stored as nothing at all, so the first fifth of
+  the travel — exactly what the gauge is for — drew nothing, and it read as
+  the trigger being ignored until something else woke the screen. Triggers
+  are on 400 now (`AXIS_DEADZONE`).
+
   Sharing the top row briefly gave the Switch map the same treatment, and
   that was wrong: the GameCube is the only Nintendo console that ever had
   analog shoulders, and a Pro Controller's ZL and ZR are switches wearing a

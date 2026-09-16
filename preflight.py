@@ -2698,6 +2698,15 @@ def draw_hint(ui, hint):
 # SDL's own axis numbering, for the log: an axis that never appears here is
 # an axis the pad is not sending, which is worth knowing when a control seems
 # dead.
+# A stick jitters around its centre and needs a deadzone, or the screen never
+# settles and every frame is a repaint. A trigger does not: it rests at zero
+# and stays there, and the first fifth of its travel is exactly what the
+# GameCube map's gauge is for. One number for both meant a gentle squeeze was
+# stored as nothing at all and drew nothing, which looked like the trigger
+# being ignored until something else woke the screen up.
+STICK_DEADZONE = 6000
+AXIS_DEADZONE = {sdlui.AXIS_TRIGGERLEFT: 400, sdlui.AXIS_TRIGGERRIGHT: 400}
+
 AXIS_NAMES = {0: "Left X", 1: "Left Y", 2: "Right X", 3: "Right Y",
               4: "Trigger L", 5: "Trigger R"}
 
@@ -3318,12 +3327,12 @@ def main():
                 inst, axis, value = payload
                 for p in pads:
                     if p.instance_id == inst:
-                        # Deadzone, or the sticks jitter constantly on screen.
-                        p.axes[axis] = value if abs(value) > 6000 else 0
+                        dead = AXIS_DEADZONE.get(axis, STICK_DEADZONE)
+                        p.axes[axis] = value if abs(value) > dead else 0
                         # Once per axis per run: enough to tell whether a
                         # trigger is arriving at all, without a line per
                         # sample. Same reason as the press log.
-                        if abs(value) > 16000 and axis not in axes_logged:
+                        if abs(value) > dead * 2 and axis not in axes_logged:
                             axes_logged.add(axis)
                             print(f"axis: P{p.slot or '-'} axis={axis} "
                                   f"({AXIS_NAMES.get(axis, '?')}) "
