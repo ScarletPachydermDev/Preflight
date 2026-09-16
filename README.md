@@ -4,75 +4,32 @@
 
 Check every controller works — *before* the game starts. Built as [SelfSteam](https://github.com/ScarletPachydermDev/SelfSteam) complement
 
-<img src=".github/screenshot.jpg" alt="Four controllers shown in colour-coded player bays, each with its buttons drawn live">
+<img src=".github/image-1789598483155.jpg" alt="Four controllers shown in colour-coded player bays, each with its buttons drawn live">
 
 </div>
 
----
-**Are you TIRED of being Player 3 in your own living room?**
-
-Sick of pressing **A** and getting **B**? Of a left stick that works perfectly
-everywhere *except* in the game? Of one controller somehow driving two players
-at once, while a third pad you definitely turned on does nothing at all?
-
-Have you ever sat down with three friends, started a race, and discovered that
-Bluetooth quietly decided tonight's player order while you were making tea?
-
-> *"I pair them in the same order EVERY TIME."*
-> — you, moments before it happens again
-
-Preflight sits between your Steam shortcut and the emulator.
-Everyone sees their own controller on screen, presses buttons to confirm they
-land where the labels say, and feels a rumble telling them which player they
-are. When it all looks right, Player 1 holds `+` and the game starts.
-
-It writes the emulator's controller config on the way through, so what you see
-on the check screen is what the game actually gets.
-
-No more troubleshooting while three people wait. **No more you being Player 3.**
-
-## Notes
+##
 
 Built for Steam Machine or Deck in a living room for multiplayer games, aimed squarely at not making other
-players wait while you work out whose controller is which and inputs work.
+players wait while you work out whose controller is which and inputs work. Just install emulator and link preflight with emulator game file launch command.
+
+## Inject configs to emulators with:
+
+- How many controllers are connected, and which player each one is
+- Every emulated console button, both sticks, d-pad and both triggers, live
+- That A means A — or the mirrored layout if you prefer. WSIWYG.
+- That no two players end up on the same controller
+- That the config it writes has no missing bindings — a blank stick in the
+  emulator's saved settings is otherwise invisible until the game starts
 
 ## Supported emulators
 
 | Emulator | Builds | What Preflight writes |
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage, tar | all four players' bindings, as Pro Controllers |
-| **Dolphin** | flatpak | GameCube pads 1–4, and the ports they plug into — Z on either shoulder |
+| **Dolphin** | flatpak | GameCube controller only |
 | **Wheel Wizard** | Flatpak, native Linux build | writes Dolphin's GameCube pads before Wheel Wizard launches it |
 | **Eden** | flatpak, AppImage | all four players' bindings, as Pro Controllers — needs Steam Input **on** |
-
-Ryubing **Canary** works as well as stable — it ships SDL3 where stable ships
-SDL2, and Preflight reads either. Both share `~/.config/Ryujinx` unless you use
-portable mode, so bindings written for one are picked up by the other.
-
-The check screen draws **the pad the game will see**, not the one in your
-hands: a GameCube game shows a GameCube map — one Start, Z on its own, A big
-in the middle of the cluster — so what lights up is what Dolphin will answer
-to. Either shoulder is GameCube's Z, and your triggers are its L and R, which
-fill up as you squeeze them rather than just lighting.
-
-Preflight's own controls follow the map. A GameCube pad has no select button,
-so quit is **Z + Start** held rather than a button of its own, and ABXY is
-mirrored with **both triggers** instead of both shoulders. A pressed button
-shows as its own colour inverted, with the label knocked out of it, inside the
-ring that says whether the label is telling the truth.
-
-Dolphin's **Wii remotes** are left alone. A Wheel Wizard shortcut is recognized
-as a Dolphin launcher: Preflight writes the appropriate Dolphin config first,
-then hands the original command to Wheel Wizard. For the Wheel Wizard Flatpak,
-that is its bundled Dolphin config under
-`~/.var/app/io.github.TeamWheelWizard.WheelWizard/config-dolphin-emu/`; for
-the native build, it is the normal Dolphin Flatpak config. Wheel Wizard can
-then prepare its mods and launch Dolphin with the checked controller setup.
-
-Point Preflight at an emulator it does not know and it still runs the check and
-still launches the game — it just says on screen that no bindings were written.
-So it is useful in front of anything, and only writes config for the supported
-backends above.
 
 ## Requirements
 
@@ -99,37 +56,13 @@ Though tool can be used without Steam input if you prefer.
 
 ## How to use
 
-Preflight wraps the command that would have started your game. Without it you
-would run something like:
-
-```bash
-flatpak run io.github.ryubing.Ryujinx -f "/run/media/deck/mSD/ROMs/Switch/game.nsp"
+Preflight wraps flatpak and appimages launch commands that would start your game. 
 ```
-
-With it, put `preflight.sh --` in front of exactly that:
-
-```bash
 ~/preflight/preflight.sh -- flatpak run io.github.ryubing.Ryujinx -f "/run/media/deck/mSD/ROMs/Switch/game.nsp"
 ```
+or enable it at [SelfSteam](https://github.com/ScarletPachydermDev/SelfSteam) from the Emulators tab on supported emulators
 
-| Command | What it does |
-|:---|:---|
-| `preflight.sh -- <command>` | check controllers, then run that command |
-| `preflight.sh "<rom>"` | shorthand: check, then launch that ROM in Ryujinx |
-| `preflight.sh` | check, then open the Ryujinx game list |
-| `preflight.sh --dry-run "<rom>"` | everything except writing config and launching |
-| `preflight.py --version` | print the version and exit |
-
-Keep the quotes around ROM paths — they have spaces in them.
-
-**If Preflight has no backend for what you point it at**, it says so on screen,
-runs the check anyway and still launches. You get the "who is holding what"
-screen in front of any emulator; you just do not get its bindings written.
-Ryubing (Ryujinx), Dolphin, Eden, and Wheel Wizard's Dolphin launch path are
-supported backends today.
-
-Each run writes its version and what it was asked to launch to
-`~/.local/state/preflight/launch.log`.
+<img src=".github/Screenshot-2026-09-16 23-28-09.webp">
 
 ### Where things live
 
@@ -146,62 +79,7 @@ takes a copy of the shipped `theme.json` and `games.json` for you, so nothing
 is lost on the way. Set `PREFLIGHT_STATE_DIR` or `PREFLIGHT_CONFIG_DIR` to put
 them somewhere else; otherwise the usual `XDG_*` variables are honoured.
 
-## Using it
-
-There is one screen, and **taps do nothing** — so everyone can mash buttons to
-test them without setting anything off. Every action is a hold or a combo:
-
-| `+` hold | Player 1 starts the game |
-|:---|:---|
-| **`L3`+`R3`** | **claim Player 1 — once per session** |
-| **`ZL`+`ZR`** | **swap ABXY on your own pad** |
-| **`−` hold** | **anyone quits** |
-
-They appear along the bottom of the screen in that order, with starting the
-game bold on the left and quitting far off to the right, where nobody reaches
-for it by accident.
-
-**On the GameCube map the two holds move**, because that pad does not have the
-buttons the others use. The legend on screen always shows the ones in force:
-
-| `Start` hold | Player 1 starts the game |
-|:---|:---|
-| **`L3`+`R3`** | **claim Player 1 — unchanged** |
-| **`L`+`R`** | **swap ABXY — the same squeeze, this pad's lettering** |
-| **`Z`+`Start` hold** | **anyone quits** |
-
-Mirroring ABXY is one gesture on both maps: **squeeze both analog triggers**.
-They are `ZL`+`ZR` on a Switch pad and `L`+`R` on a GameCube one, which is why
-the legend reads differently while your hands do the same thing.
-
-A GameCube pad has no select button to hold for quitting, so Start carries
-both: alone it starts, with Z it quits. Z being lit is what tells them apart,
-and the ring's colour backs it up.
-
-Everything else is deliberately in the same place on every map — the rows, the
-lanes, the sizes — so a screen you have used once is a screen you can read.
-
-Player slots follow the order controllers wake up. Whoever is on first is
-Player 1; `L3`+`R3` takes that spot if you are not. It locks after one use so
-nobody can keep taking it back.
-
-ABXY are Nintendo controller layout and is set by default WSIWYG,
-press the button marked A and the circle marked A lights. Each button's own
-outline carries the answer: **green** when the label is telling the truth,
-**amber** when it is not. A press fills the button in the player's colour from
-inside that outline, so the colour is still there while you hold it. If you would rather match physical position than labels, `L`
-+`R` mirrors it for your pad only, and Preflight remembers.
-
 Colours and rumble pacing live in `~/.config/preflight/theme.json`.
-
-## What it checks
-
-- How many controllers are connected, and which player each one is
-- Every button, both sticks, the d-pad and both triggers, live
-- That A means A — or the mirrored layout if you prefer. WSIWYG.
-- That no two players end up on the same controller
-- That the config it writes has no missing bindings — a blank stick in the
-  emulator's saved settings is otherwise invisible until the game starts
 
 ## Limitations
 
