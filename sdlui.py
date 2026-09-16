@@ -480,8 +480,14 @@ class UI:
         return self._images[path]
 
     def image(self, path, x, y, w, h, color=(255, 255, 255), alpha=255,
-              additive=False):
+              additive=False, clip=None):
         """Draw a PNG, tinted by `color` and faded by `alpha`.
+
+        `clip` is an (x, y, w, h) rectangle in screen coordinates that the
+        drawing is confined to. The image is still scaled to its full
+        destination first, so a clip shows a PART of the finished glyph — how
+        a trigger fills up as it is squeezed, rather than a squashed copy of
+        it.
 
         `additive` adds the image to what is underneath instead of blending
         over it. Colour modulation can only ever darken, so art that is already
@@ -498,6 +504,13 @@ class UI:
         self.sdl.SDL_SetTextureColorMod(tex, color[0], color[1], color[2])
         self.sdl.SDL_SetTextureAlphaMod(tex, alpha)
         dst = SDL_Rect(int(x), int(y), int(w), int(h))
+        if clip is not None:
+            box = SDL_Rect(int(clip[0]), int(clip[1]),
+                           max(0, int(clip[2])), max(0, int(clip[3])))
+            self.sdl.SDL_RenderSetClipRect(self.renderer, ctypes.byref(box))
+            self.sdl.SDL_RenderCopy(self.renderer, tex, None, ctypes.byref(dst))
+            self.sdl.SDL_RenderSetClipRect(self.renderer, None)
+            return
         self.sdl.SDL_RenderCopy(self.renderer, tex, None, ctypes.byref(dst))
 
     def stripe_bg(self, x, y, w, h, c1, c2, period=26):

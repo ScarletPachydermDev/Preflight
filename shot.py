@@ -9,6 +9,8 @@ at it. It caught a badly distorted gamepad once that compiled perfectly.
     ./shot.py out.png --pads 4             # four synthetic pads, no hardware needed
     ./shot.py out.png --alert "text"       # with the alert band
     ./shot.py out.png --pads 2 --swap 2    # pad 2 showing the mirrored badge
+    ./shot.py out.png --pads 4 --layout gamecube            # the Dolphin map
+    ./shot.py out.png --pads 1 --press 1:a,b,start,lshoulder --axes 1:4=32767
 
 Zero dependencies: SDL's offscreen video driver, SDL_RenderReadPixels, and a
 PNG written by hand out of zlib — the same reason sdlui carries its own PNG
@@ -33,6 +35,22 @@ import sdlui                                                    # noqa: E402
 import preflight as pf                                          # noqa: E402
 
 SDL_PIXELFORMAT_ARGB8888 = 0x16362004
+
+
+def button_id(name):
+    """A button by the name SDL gives it, so --press reads like the pad."""
+    def norm(text):
+        return text.strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+
+    wanted = norm(name)
+    for btn, sdl_name in pf.BUTTON_NAMES.items():
+        if norm(sdl_name) == wanted:
+            return btn
+    for btn, sdl_name in pf.BUTTON_NAMES.items():
+        if norm(sdl_name).startswith(wanted):
+            return btn
+    sys.exit(f"unknown button {name!r}; have "
+             + ", ".join(sorted(pf.BUTTON_NAMES.values())))
 
 
 class FakePad:
@@ -88,6 +106,14 @@ def main():
     ap.add_argument("--swap", type=int, action="append", default=[],
                     help="slot number to show with its A/B mirrored")
     ap.add_argument("--alert", help="text for the alert band")
+    ap.add_argument("--layout", default="switch", choices=("switch", "gamecube"),
+                    help="which pad the map describes; gamecube is Dolphin's")
+    ap.add_argument("--press", action="append", default=[], metavar="SLOT:NAMES",
+                    help="hold these buttons on that pad, e.g. 2:a,start,dpad_up")
+    ap.add_argument("--axes", action="append", default=[], metavar="SLOT:N=V",
+                    help="set raw axes on that pad, e.g. 1:0=-32768,4=32767")
+    ap.add_argument("--hold", action="append", default=[], metavar="SLOT:NAME=SECS",
+                    help="show a hold in progress, e.g. 1:start=0.8")
     ap.add_argument("--size", default="2560x1440",
                     help="surface to render at; defaults to a 1440p TV, "
                          "because the offscreen desktop is 1024x768 and 4:3")
@@ -117,8 +143,28 @@ def main():
                 if pad.slot == slot:
                     pad.swap_faces = True
 
-    pf.draw_pad_grid(ui, pads, pf.RumbleCycle(sdl), [], None, {}, False,
-                     args.alert)
+    holds = {}
+    for spec in args.press:
+        slot, _, names = spec.partition(":")
+        for pad in pads:
+            if pad.slot == int(slot):
+                pad.held |= {button_id(n) for n in names.split(",") if n}
+    for spec in args.axes:
+        slot, _, pairs = spec.partition(":")
+        for pad in pads:
+            if pad.slot == int(slot):
+                for pair in pairs.split(","):
+                    n, _, v = pair.partition("=")
+                    pad.axes[int(n)] = int(v)
+    for spec in args.hold:
+        slot, _, pair = spec.partition(":")
+        name, _, secs = pair.partition("=")
+        for pad in pads:
+            if pad.slot == int(slot):
+                holds.setdefault(pad.key, {})[button_id(name)] = float(secs)
+
+    pf.draw_pad_grid(ui, pads, pf.RumbleCycle(sdl), [], None, holds, False,
+                     args.alert, layout=args.layout)
 
     buf = (ctypes.c_uint8 * (ui.w * ui.h * 4))()
     sdl.SDL_RenderReadPixels.argtypes = [ctypes.c_void_p, ctypes.c_void_p,

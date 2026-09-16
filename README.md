@@ -41,13 +41,25 @@ players wait while you work out whose controller is which and inputs work.
 | Emulator | Builds | What Preflight writes |
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage, tar | all four players' bindings, as Pro Controllers |
-| **Dolphin** | flatpak | GameCube pads 1–4, and the ports they plug into |
+| **Dolphin** | flatpak | GameCube pads 1–4, and the ports they plug into — Z on either shoulder |
 | **Wheel Wizard** | Flatpak, native Linux build | writes Dolphin's GameCube pads before Wheel Wizard launches it |
 | **Eden** | flatpak, AppImage | all four players' bindings, as Pro Controllers — needs Steam Input **on** |
 
 Ryubing **Canary** works as well as stable — it ships SDL3 where stable ships
 SDL2, and Preflight reads either. Both share `~/.config/Ryujinx` unless you use
 portable mode, so bindings written for one are picked up by the other.
+
+The check screen draws **the pad the game will see**, not the one in your
+hands: a GameCube game shows a GameCube map — one Start, Z on its own, A big
+in the middle of the cluster — so what lights up is what Dolphin will answer
+to. Either shoulder is GameCube's Z, and your triggers are its L and R, which
+fill up as you squeeze them rather than just lighting.
+
+Preflight's own controls follow the map. A GameCube pad has no select button,
+so quit is **Z + Start** held rather than a button of its own, and ABXY is
+mirrored with **both triggers** instead of both shoulders. A pressed button
+shows as its own colour inverted, with the label knocked out of it, inside the
+ring that says whether the label is telling the truth.
 
 Dolphin's **Wii remotes** are left alone. A Wheel Wizard shortcut is recognized
 as a Dolphin launcher: Preflight writes the appropriate Dolphin config first,
@@ -149,6 +161,20 @@ They appear along the bottom of the screen in that order, with starting the
 game bold on the left and quitting far off to the right, where nobody reaches
 for it by accident.
 
+**On the GameCube map two of them move**, because that pad does not have the
+buttons the others use. The legend on screen always shows the ones in force:
+
+| `Start` hold | Player 1 starts the game |
+|:---|:---|
+| **`L3`+`R3`** | **claim Player 1 — unchanged** |
+| **both triggers** | **swap ABXY on your own pad** |
+| **`Z`+`Start` hold** | **anyone quits** |
+
+A GameCube pad has no select button to hold for quitting, so Start carries
+both: alone it starts, with Z it quits. Z being lit is what tells them apart,
+and the ring's colour backs it up. And since that pad's shoulders *are* Z, the
+mirror gesture is the two analog triggers instead — squeeze both firmly.
+
 Player slots follow the order controllers wake up. Whoever is on first is
 Player 1; `L3`+`R3` takes that spot if you are not. It locks after one use so
 nobody can keep taking it back.
@@ -183,7 +209,11 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - On Dolphin a pad is bound by its kernel device name, so Preflight has to be
   able to read that pad's node. A controller SDL can see does not always have
   one: Steam takes the 2026 Steam Controller over at hidraw level and publishes
-  only a virtual pad, which leaves Dolphin nothing to bind to.
+  only a virtual pad, which leaves Dolphin nothing to bind to. That pad also
+  arrives already remapped — L and both back paddles came through as d-pad up
+  — so it is the one controller where the check screen cannot show you the
+  truth about its shoulders. Every other pad maps L to Z in the game exactly
+  as written.
 
 ## Troubleshooting
 
@@ -193,7 +223,28 @@ never launched it — Steam sometimes believes a shortcut is still running and
 the Play button silently does nothing, which a Steam restart clears.
 
 `shot.py` renders the check screen to a PNG instead of the TV, which is how
-a layout change gets checked: `./shot.py out.png --pads 4`.
+a layout change gets checked: `./shot.py out.png --pads 4`. It can draw either
+map (`--layout gamecube`) and fake any input, so a pressed button or a stick at
+full deflection can be looked at without a controller in reach:
+`./shot.py out.png --pads 1 --press 1:a,start --axes 1:0=-32768`.
+
+The log also records **what the pad actually sent** — every press as SDL
+delivered it, and the first time each axis moves:
+
+```
+press: P1 btn=11 (D-Up)
+axis:  P1 axis=4 (Trigger L) reached 27312
+```
+
+That is the diagnostic for "this button does the wrong thing". Steam Input
+sits between the pad and Preflight, and a per-game layout can bind a shoulder
+to something else entirely — seen for real: a Steam Controller whose L1 and
+both back paddles all arrived as `btn=11 (D-Up)`, so Z never lit. Preflight is
+showing exactly what it receives; the binding is Steam's, and the only place
+to change it is that shortcut's controller layout (Steam's per-game controller
+settings — switching it to a plain **Gamepad** template binds the shoulders as
+shoulders). Note Dolphin is bound to the physical device through evdev, so a
+remapped pad can look wrong here and still play correctly.
 
 `tools/steam-shortcut.py` lists Steam's non-Steam shortcuts and can put a
 launcher in front of one, reading and rewriting `shortcuts.vdf` in place with a
@@ -203,3 +254,16 @@ what a shortcut actually runs; SelfSteam is what creates them normally.
 `phase0.py` is a standalone diagnostic that prints every controller the system
 can see, how the emulator will identify it, and whether Steam is intercepting.
 Run it if something looks wrong and you want the full picture.
+
+## Credits
+
+Button art by two people who made theirs free to use, and the icons are the
+reason the check screen reads from across a room:
+
+- **Switch-style glyphs** — [Kenney](https://kenney.nl), *Input Prompts*, CC0.
+- **GameCube glyphs** — [Zacksly](https://zacksly.itch.io), *GameCube Button
+  Icons and Controls*, [CC BY 3.0](http://creativecommons.org/licenses/by/3.0/).
+  Modified: converted to RGBA, and X turned on its end with its letter left
+  upright (see `tools/stage-gc-art.py`).
+
+Built with [Claude Code](https://claude.com/claude-code).

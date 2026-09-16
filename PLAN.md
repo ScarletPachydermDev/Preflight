@@ -180,6 +180,98 @@ belonged to whichever controller Steam parked in that slot last time.
 rejoins at the end rather than reclaiming its old slot — whoever took over
 while it was away keeps their place.
 
+**The map follows the emulator, not the pad in the player's hands**
+(2026-09-15). Dolphin gets a GameCube map: one Start, Z on its own, two analog
+shoulders, and a cluster built round a big A. It lights by what Dolphin will
+bind — Z is the pad's right shoulder, L and R its triggers — so a press on
+screen predicts the press in the game, which is the whole point of the screen.
+A physical pad's own layout is not drawn and never was: see the face-button
+note above.
+
+Three things about how it is built, each of which was learned by getting it
+wrong first:
+
+* **The art is sized by its INK, not its canvas.** Zacksly's glyphs each carry
+  a different margin, so drawing them all in equal boxes threw the
+  proportions out. `GC_INK` holds the measured ink fraction per glyph, and
+  `GC_PSD` asks for ink sizes in the layout PSD's own pixels — a number in
+  that table can be checked against the picture it came from.
+* **The PSD sets the clusters; the lanes set the gaps.** Transcribing the
+  PSD's own spacing literally left everything small and the C stick touching
+  B, because those gaps were whatever suited a 3556-pixel canvas. So each
+  cluster keeps its internal geometry and the four are spread across the bay
+  with equal air, exactly as the Switch map does. The d-pad is the one size
+  NOT taken from the PSD: the two maps scale differently and the PSD's number
+  came out 13% smaller than the Switch map's, so the table carries the size
+  that matches on screen instead.
+* **A wysiwyg ring is the button's own outline, recoloured.** Not one of A,
+  B, X, Y is a circle on this pad, so the annulus the Switch map uses has
+  nothing to be concentric with. A grown copy of the filled silhouette behind
+  each button was tried and read as a second outline fighting the first;
+  painting the ink itself green or amber is exact and needs no extra art.
+* **The face buttons come from the layout mock-up, and their presses are cut
+  from themselves.** `tools/stage-gc-art.py` slices the four blobs out of
+  `green gc.png`, repaints them white so they can tint, thins them all to
+  whichever was drawn finest (the mock-up gives A a 17px line against B's 11,
+  which is plain to see side by side), and drops the pack's letter back in
+  UPRIGHT on each blob's **interior centroid** — the pack draws its labels
+  off to one side to suit the tilt of a real pad, and the bounding-box centre
+  is not the visual centre of a shape that leans.
+
+  A press is the blob's own interior, eroded by the line's width plus a gap.
+  Deriving it from the pack's filled art instead was wrong twice over: the
+  mock-up scaled X and Y unevenly, so no single stretch nests one shape in
+  the other, and the result was visibly out of true exactly where the two
+  disagreed. Eroding cannot go out of true — every point of the result is the
+  same distance inside the line that encircles it, whatever shape that is.
+
+* **L and R fill; they do not switch.** They are analog on this pad and
+  Dolphin binds them to the analog triggers, so the filled glyph is drawn
+  over the outline and clipped as the trigger goes down. Clip against the
+  INK, not the canvas: every glyph in the pack sits in its own margin, L's is
+  a fifth of the canvas, and measuring from the box meant the first fifth of
+  the travel filled empty space — the button looked like it was ignoring a
+  slow press.
+
+Two gestures had to move, and both for the same reason — **preflight's own
+controls have to be reachable on the map being drawn**:
+
+* **Quit.** A GameCube pad has no select button, so there is nothing to hold.
+  Start carries both gestures instead: alone it starts, with Z it quits. Z
+  being lit says which, and the ring's colour backs that up — white, not the
+  obvious red, because P1 *is* red and the two rings came out identical on
+  the one pad that does the starting. The physical Back button still quits,
+  as a way out if a pad's shoulders are being remapped out from under us.
+* **Swap ABXY.** On the Switch map it is the two shoulders. On this one the
+  shoulders are Z, so the gesture is the two analog triggers — which is what
+  the legend draws there, and drawing L and R for a gesture bound to the
+  shoulders sent a player straight to the wrong pair of controls. The
+  shoulder gesture is disabled on this map: flipping the face mapping as a
+  side effect of pressing Z would be a trap. Axes carry no press events, so
+  it is judged from the values each frame, with separate on and off
+  thresholds so a trigger resting near the line cannot rattle the mapping.
+
+**A caution about this map and Dolphin.** Preflight reads SDL, which under
+Steam Input means the virtual pad; Dolphin is bound to the physical device
+through evdev, by kernel name. So a Steam Input layout that remaps a button
+changes what the map shows without changing what the game receives.
+
+Seen from both sides on 2026-09-16. On the **2026 Steam Controller** the
+Wheel Wizard shortcut delivered `btn=11 (D-Up)` for L and for both back
+paddles, while R arrived correctly as 10, so Z would not light and the old
+two-shoulder swap could never fire. That pad has no evdev binding either —
+Steam holds it at hidraw level and publishes only a virtual pad, so the
+Dolphin backend has no kernel device to write. On **every other pad** L maps
+to Z in the game exactly as written. The layout itself is not readable from
+disk: the shortcut is `UseSteamControllerConfig 2`, `controller_configs/` is
+empty, and `launcher.vdf` binds the bumpers correctly, so Steam is keeping
+the applied per-game layout in the cloud. It can only be changed in Steam's
+own UI.
+
+The map is still the right diagnostic — it shows exactly what arrives, which
+is how this was found at all — but the two are reading different layers, and
+a report of "button X does the wrong thing" has to start with the press log.
+
 ## 6. Known limitations
 
 - **The gap.** If a pad sleeps or wakes between the config write and Ryujinx's
