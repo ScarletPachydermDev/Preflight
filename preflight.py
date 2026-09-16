@@ -30,6 +30,7 @@ hardware, not guesses:
     apart even when Ryujinx cannot.
 """
 
+import collections
 import copy
 import ctypes
 import select
@@ -2414,24 +2415,33 @@ class Layout:
         return self.mid + offset * self.fit * self.dh
 
 
-def draw_top_row(g, lay, items, holds, held, axes):
-    """The top strip, shared by both maps.
+# One entry in the top row. `buttons` is every button that lights it — a
+# GameCube's Z is one button on that pad and two on the controller in your
+# hands. `axis` is the SDL axis behind it, if any, and `analog` says whether
+# the pad MEANS it: a GameCube's L and R are real analog triggers and fill as
+# they go down, while a Switch pad's ZL and ZR are switches wearing a
+# trigger's shape. The GameCube is the only Nintendo console that ever had
+# analog shoulders, so it is the only map that draws them that way.
+Control = collections.namedtuple(
+    "Control", "offset name box buttons axis analog",
+    defaults=((), None, False))
 
-    Each item is (offset, name, box, buttons, axis). An axis makes it an
-    analog trigger, which fills as it goes down; otherwise `buttons` is every
-    button that lights it — a GameCube's Z is one button on the pad and two
-    on the controller in your hands.
-    """
-    for offset, name, box, btns, axis in items:
-        cx = lay.across(offset)
-        if axis is not None:
-            trigger(g, name, cx, lay.top_y, box, box, axes.get(axis, 0))
+
+def draw_top_row(g, lay, items, holds, held, axes):
+    """The top strip, shared by both maps."""
+    for c in items:
+        cx = lay.across(c.offset)
+        if c.analog:
+            trigger(g, c.name, cx, lay.top_y, c.box, c.box,
+                    axes.get(c.axis, 0))
             continue
-        g.glyph(name, cx, lay.top_y, box,
-                active=any(b in held for b in btns))
-        for btn in btns:
+        down = any(b in held for b in c.buttons)
+        if c.axis is not None:
+            down = down or axes.get(c.axis, 0) > 8000
+        g.glyph(c.name, cx, lay.top_y, c.box, active=down)
+        for btn in c.buttons:
             if holds.get(btn, 0.0) > 0:
-                hold_ring(g.ui, cx, lay.top_y, box * 0.643, holds[btn],
+                hold_ring(g.ui, cx, lay.top_y, c.box * 0.643, holds[btn],
                           g.lit, g.track)
 
 
@@ -2441,12 +2451,12 @@ def _switch_controls(g, held, axes, swap, holds, wys):
     lay = Layout(g)
 
     draw_top_row(g, lay, (
-        (-lay.TRIGGER, "zl", S(0.31), (), 4),
-        (-lay.SHOULDER, "l", S(0.31), (BTN_LSHOULDER,), None),
-        (lay.SHOULDER, "r", S(0.31), (BTN_RSHOULDER,), None),
-        (lay.TRIGGER, "zr", S(0.31), (), 5),
-        (-lay.INNER, "minus", S(0.21), (BTN_BACK,), None),
-        (lay.INNER, "plus", S(0.21), (BTN_START,), None),
+        Control(-lay.TRIGGER, "zl", S(0.31), axis=4),
+        Control(-lay.SHOULDER, "l", S(0.31), (BTN_LSHOULDER,)),
+        Control(lay.SHOULDER, "r", S(0.31), (BTN_RSHOULDER,)),
+        Control(lay.TRIGGER, "zr", S(0.31), axis=5),
+        Control(-lay.INNER, "minus", S(0.21), (BTN_BACK,)),
+        Control(lay.INNER, "plus", S(0.21), (BTN_START,)),
     ), holds, held, axes)
 
     # The directional art is the same cross with one arm marked, so a pressed
@@ -2514,7 +2524,6 @@ GC_FACES = gc_faces(_GC_FACES_AS_DRAWN, bigger=1.10, spread=1.06)
 # fill is measured against its ink, and a shape whose box has to be worked
 # back from the ink the layout asked for.
 INK = {
-    "zl": (0.625, 0.688), "zr": (0.625, 0.688),
     "gc/l": (0.852, 0.555), "gc/r": (0.852, 0.555),
     "gc/a": (0.898, 0.898), "gc/b": (0.898, 0.898),
     "gc/x": (0.590, 0.898), "gc/y": (0.898, 0.570),
@@ -2555,10 +2564,11 @@ def _gamecube_controls(g, held, axes, swap, holds, wys):
     # shoulder for it, so it sits in the right shoulder's place and lights
     # from both. Start takes the middle, between where minus and plus are.
     draw_top_row(g, lay, (
-        (-lay.TRIGGER, "l", S(0.31), (), 4),
-        (lay.SHOULDER, "z", S(0.31), (BTN_LSHOULDER, BTN_RSHOULDER), None),
-        (lay.TRIGGER, "r", S(0.31), (), 5),
-        (0.0, "start_plain", S(0.21), (BTN_START,), None),
+        Control(-lay.TRIGGER, "l", S(0.31), axis=4, analog=True),
+        Control(lay.SHOULDER, "z", S(0.31),
+                (BTN_LSHOULDER, BTN_RSHOULDER)),
+        Control(lay.TRIGGER, "r", S(0.31), axis=5, analog=True),
+        Control(0.0, "start_plain", S(0.21), (BTN_START,)),
     ), holds, held, axes)
 
     # Quit runs through Start as well, because this pad has no second button

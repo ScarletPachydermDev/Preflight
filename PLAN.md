@@ -270,13 +270,19 @@ wrong first:
   disagreed. Eroding cannot go out of true — every point of the result is the
   same distance inside the line that encircles it, whatever shape that is.
 
-* **L and R fill; they do not switch.** They are analog on this pad and
-  Dolphin binds them to the analog triggers, so the filled glyph is drawn
-  over the outline and clipped as the trigger goes down. Clip against the
-  INK, not the canvas: every glyph in the pack sits in its own margin, L's is
-  a fifth of the canvas, and measuring from the box meant the first fifth of
-  the travel filled empty space — the button looked like it was ignoring a
-  slow press.
+* **L and R fill; they do not switch — and only on this map.** They are
+  analog on this pad and Dolphin binds them to the analog triggers, so the
+  filled glyph is drawn over the outline and clipped as the trigger goes
+  down. Clip against the INK, not the canvas: every glyph in the pack sits in
+  its own margin, L's is a fifth of the canvas, and measuring from the box
+  meant the first fifth of the travel filled empty space — the button looked
+  like it was ignoring a slow press.
+
+  Sharing the top row briefly gave the Switch map the same treatment, and
+  that was wrong: the GameCube is the only Nintendo console that ever had
+  analog shoulders, and a Pro Controller's ZL and ZR are switches wearing a
+  trigger's shape. `Control.analog` is what says which, per entry, so a map
+  draws its pad and not the one next door.
 
 Two gestures had to move, and both for the same reason — **preflight's own
 controls have to be reachable on the map being drawn**:
