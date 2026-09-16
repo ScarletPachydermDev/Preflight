@@ -154,26 +154,32 @@ test them without setting anything off. Every action is a hold or a combo:
 | `+` hold | Player 1 starts the game |
 |:---|:---|
 | **`L3`+`R3`** | **claim Player 1 — once per session** |
-| **`L`+`R`** | **swap ABXY on your own pad** |
+| **`ZL`+`ZR`** | **swap ABXY on your own pad** |
 | **`−` hold** | **anyone quits** |
 
 They appear along the bottom of the screen in that order, with starting the
 game bold on the left and quitting far off to the right, where nobody reaches
 for it by accident.
 
-**On the GameCube map two of them move**, because that pad does not have the
+**On the GameCube map the two holds move**, because that pad does not have the
 buttons the others use. The legend on screen always shows the ones in force:
 
 | `Start` hold | Player 1 starts the game |
 |:---|:---|
 | **`L3`+`R3`** | **claim Player 1 — unchanged** |
-| **both triggers** | **swap ABXY on your own pad** |
+| **`L`+`R`** | **swap ABXY — the same squeeze, this pad's lettering** |
 | **`Z`+`Start` hold** | **anyone quits** |
+
+Mirroring ABXY is one gesture on both maps: **squeeze both analog triggers**.
+They are `ZL`+`ZR` on a Switch pad and `L`+`R` on a GameCube one, which is why
+the legend reads differently while your hands do the same thing.
 
 A GameCube pad has no select button to hold for quitting, so Start carries
 both: alone it starts, with Z it quits. Z being lit is what tells them apart,
-and the ring's colour backs it up. And since that pad's shoulders *are* Z, the
-mirror gesture is the two analog triggers instead — squeeze both firmly.
+and the ring's colour backs it up.
+
+Everything else is deliberately in the same place on every map — the rows, the
+lanes, the sizes — so a screen you have used once is a screen you can read.
 
 Player slots follow the order controllers wake up. Whoever is on first is
 Player 1; `L3`+`R3` takes that spot if you are not. It locks after one use so

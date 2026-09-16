@@ -478,7 +478,7 @@ class Pad:
         # A/B and X/Y always move together — no real controller mirrors one
         # pair without the other — so this is a single setting.
         self.swap_faces = False
-        self.swap_explicit = False    # True once a player has pressed L+R
+        self.swap_explicit = False    # True once a player has asked for it
 
     @property
     def store_key(self):
@@ -2258,10 +2258,6 @@ def hold_ring(ui, cx, cy, radius, fraction, color, track):
 
 
 PAD_ASPECT = 2.4        # a wide strip; the bays are much wider than they are tall
-# A GameCube's controls are spread wider than a Switch's, so its strip is
-# wider too. Fitting that map into a 2.4 one shrank everything to make room
-# and left the bay's own width unused on both sides.
-LAYOUT_ASPECT = {"switch": PAD_ASPECT, "gamecube": 2.85}
 
 
 class Bay:
@@ -2348,81 +2344,116 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
     the one in the player's hands: a GameCube game gets a GameCube map, so
     what is on screen is what the game will answer to.
     """
-    aspect = LAYOUT_ASPECT.get(layout, PAD_ASPECT)
-    dw, dh = bw, bw / aspect
+    dw, dh = bw, bw / PAD_ASPECT
     if dh > bh:
-        dw, dh = bh * aspect, bh
+        dw, dh = bh * PAD_ASPECT, bh
     g = Bay(ui, bx + (bw - dw) / 2, by + (bh - dh) / 2, dw, dh, col, bg, dim,
             art="gc/" if layout == "gamecube" else "")
     controls = _gamecube_controls if layout == "gamecube" else _switch_controls
     controls(g, held, axes, swap, holds or {}, wys)
 
 
-def _switch_controls(g, held, axes, swap, holds, wys):
-    X, Y, S, idle, lit = g.X, g.Y, g.S, g.idle, g.lit
-    on = held.__contains__
-    button = g.glyph
+class Layout:
+    """Where the controls go. The same on both maps, by design.
 
-    # The row below is laid out first, because the top row hangs off it.
-    # One row, four lanes, equal air between them — the PSD puts the d-pad,
-    # both sticks and the cluster on a single centre line. Each lane is as
-    # wide as its content can ever get: a stick at full deflection, the face
-    # cluster including its rings. Computed rather than hand-placed, because
+    A player who has used one of these screens should recognise the other
+    instantly, so the rows, the lanes and the sizes are shared and only the
+    glyphs differ. Every number here is a fraction of the strip's HEIGHT —
+    height is what the bay actually limits — except positions across, which
+    are measured out from the point midway between the two sticks.
+    """
+
+    # Four lanes on one centre line, equal air between them. Each is as wide
+    # as its content can ever get: a stick at full deflection, the face
+    # cluster at its full spread. Computed rather than hand-placed, because
     # every time these were fixed fractions a size change put two of them on
     # top of each other.
-    dside = S(0.48)
-    sside = S(0.36)
-    stravel = sside * 0.28
-    fside = S(0.30)
-    fspread = S(0.215)
-    # Measured off the art: the glyph's own circle ends at 0.375 of the box
-    # side, 96px of ink in a 128px canvas. It used to need a band on top of
-    # that for a separate ring; the outline carries the colour itself now.
-    freach = fspread + fside * 0.375
+    def __init__(self, g):
+        S = self.S = g.S
+        self.dside = S(0.48)                  # the d-pad
+        self.sside = S(0.36)                  # a stick's own glyph
+        self.stravel = self.sside * 0.28      # how far it can move
+        self.fside = S(0.30)                  # one face button
+        self.fspread = S(0.215)               # from the cluster's centre
+        # Measured off the art: a face glyph's own circle ends at 0.375 of
+        # the box side, 96px of ink in a 128px canvas.
+        self.freach = self.fspread + self.fside * 0.375
 
-    lanes = (dside, sside + 2 * stravel, sside + 2 * stravel, 2 * freach)
-    air = (g.dw - sum(lanes)) / (len(lanes) + 1)
-    centres, run = [], g.ox + air
-    for lane in lanes:
-        centres.append(run + lane / 2)
-        run += lane + air
-    row_y = Y(0.635)
+        lanes = (self.dside,
+                 self.sside + 2 * self.stravel,
+                 self.sside + 2 * self.stravel,
+                 2 * self.freach)
+        air = (g.dw - sum(lanes)) / (len(lanes) + 1)
+        self.centres, run = [], g.ox + air
+        for lane in lanes:
+            self.centres.append(run + lane / 2)
+            run += lane + air
 
-    # Triggers and shoulders in the outer corners, minus and plus in the
-    # middle — one row, so the columns below stay clear. Hung off the point
-    # midway BETWEEN THE STICKS rather than the middle of the strip, because
-    # those are not the same point: the face cluster's lane is wider than the
-    # d-pad's, so the row below sits left of centre, and a top row centred on
-    # the strip was visibly out of line with it. Scaled to whatever fits once
-    # it is off-centre, keeping its own spacing.
-    mid = (centres[1] + centres[2]) / 2
-    reach = min(mid - g.ox, g.ox + g.dw - mid) - S(0.31) / 2
-    fit = min(1.0, reach / S(1.02))
-    top_y = Y(0.085)
+        self.row_y = g.Y(0.635)
+        self.top_y = g.Y(0.085)
 
-    def across(offset):
-        return mid + offset * fit * g.dh
+        # The top row hangs off the point midway BETWEEN THE STICKS, not the
+        # middle of the strip. Those are not the same point — the face
+        # cluster's lane is wider than the d-pad's, so the lanes sit left of
+        # centre — and a top row centred on the strip was visibly out of line
+        # with everything under it. Scaled to whatever fits once it is
+        # off-centre, keeping its own spacing.
+        self.mid = (self.centres[1] + self.centres[2]) / 2
+        reach = min(self.mid - g.ox, g.ox + g.dw - self.mid) - S(0.31) / 2
+        self.fit = min(1.0, reach / S(1.02))
+        self.dh = g.dh
 
-    for offset, name, btn, axis in ((-1.02, "zl", None, 4),
-                                    (-0.684, "l", BTN_LSHOULDER, None),
-                                    (0.684, "r", BTN_RSHOULDER, None),
-                                    (1.02, "zr", None, 5)):
-        active = on(btn) if btn is not None else axes.get(axis, 0) > 8000
-        button(name, across(offset), top_y, S(0.31), active=active)
+    # Across the top row, by role rather than by name: the outer pair are the
+    # analog triggers on either pad, then the shoulders, then whatever sits
+    # beside the middle. A GameCube pad has fewer of them, not different ones.
+    TRIGGER = 1.02
+    SHOULDER = 0.684
+    INNER = 0.228
 
-    for offset, btn, name in ((-0.228, BTN_BACK, "minus"),
-                              (0.228, BTN_START, "plus")):
-        button(name, across(offset), top_y, S(0.21), active=on(btn))
-        held_for = holds.get(btn, 0.0)
-        if held_for > 0:
-            hold_ring(g.ui, across(offset), top_y, S(0.135), held_for, lit,
-                      g.track)
+    def across(self, offset):
+        return self.mid + offset * self.fit * self.dh
+
+
+def draw_top_row(g, lay, items, holds, held, axes):
+    """The top strip, shared by both maps.
+
+    Each item is (offset, name, box, buttons, axis). An axis makes it an
+    analog trigger, which fills as it goes down; otherwise `buttons` is every
+    button that lights it — a GameCube's Z is one button on the pad and two
+    on the controller in your hands.
+    """
+    for offset, name, box, btns, axis in items:
+        cx = lay.across(offset)
+        if axis is not None:
+            trigger(g, name, cx, lay.top_y, box, box, axes.get(axis, 0))
+            continue
+        g.glyph(name, cx, lay.top_y, box,
+                active=any(b in held for b in btns))
+        for btn in btns:
+            if holds.get(btn, 0.0) > 0:
+                hold_ring(g.ui, cx, lay.top_y, box * 0.643, holds[btn],
+                          g.lit, g.track)
+
+
+def _switch_controls(g, held, axes, swap, holds, wys):
+    S = g.S
+    on = held.__contains__
+    lay = Layout(g)
+
+    draw_top_row(g, lay, (
+        (-lay.TRIGGER, "zl", S(0.31), (), 4),
+        (-lay.SHOULDER, "l", S(0.31), (BTN_LSHOULDER,), None),
+        (lay.SHOULDER, "r", S(0.31), (BTN_RSHOULDER,), None),
+        (lay.TRIGGER, "zr", S(0.31), (), 5),
+        (-lay.INNER, "minus", S(0.21), (BTN_BACK,), None),
+        (lay.INNER, "plus", S(0.21), (BTN_START,), None),
+    ), holds, held, axes)
 
     # The directional art is the same cross with one arm marked, so a pressed
     # direction goes straight over the idle cross — a diagonal shows both arms
     # for free. The d-pad keeps the plain tint: it is not a button with a
     # label to knock out.
-    dpad_arms(g, centres[0], row_y, dside, held)
+    dpad_arms(g, lay.centres[0], lay.row_y, lay.dside, held)
 
     # Face buttons are drawn in the Switch's arrangement — X top, Y left,
     # A right, B bottom — and each lights by NAME, not by position. Press the
@@ -2430,45 +2461,34 @@ def _switch_controls(g, held, axes, swap, holds, wys):
     # corner it physically lives in. Location accuracy is the thing being
     # traded away, deliberately.
     live = face_live(held, swap)
-
-    fcx, fcy = centres[3], row_y
     for letter, name, dx, dy in (("X", "x", 0, -1), ("Y", "y", -1, 0),
                                  ("A", "a", 1, 0), ("B", "b", 0, 1)):
-        g.face(name, fcx + dx * fspread, fcy + dy * fspread, fside,
+        g.face(name, lay.centres[3] + dx * lay.fspread,
+               lay.row_y + dy * lay.fspread, lay.fside,
                pressed=letter in live, wys=wys)
 
-    # sticks: a dim well with a knob that actually moves
     for lane, btn, ax, ay, name in ((1, BTN_LSTICK, 0, 1, "stick_l"),
                                     (2, BTN_RSTICK, 2, 3, "stick_r")):
-        stick(g, centres[lane], row_y, sside, stravel, axes, ax, ay,
-              name, on(btn))
+        stick(g, lay.centres[lane], lay.row_y, lay.sside, lay.stravel,
+              axes, ax, ay, name, on(btn))
 
 
-# The GameCube map, transcribed from the layout PSD. Kept in that file's own
-# pixels — centre, then ink width and height — so any number here can be
-# checked against the picture it came from, and a nudge is a nudge in the
-# units the layout was drawn in.
+# The GameCube face cluster, transcribed from the layout PSD in that file's
+# own pixels — centre, then ink width and height. Only the cluster: where the
+# rows and lanes go is shared with the Switch map (see Layout), so the two
+# screens read as one tool. What is left here is the part that really is
+# different — four buttons of four sizes around a big A, rather than a
+# diamond of equal circles.
 #
-# Ink, not canvas: every glyph in the pack carries its own margin, and a
-# different one per glyph, so sizing by canvas would make a nonsense of the
-# proportions. GC_INK is what converts between the two, measured off the pack.
-_GC_PSD_AS_DRAWN = {
-    "l":        ((1080,  560), (278, 182)),
-    "start":    ((1861,  600), (127, 127)),
-    "z":        ((2550,  582), (264, 133)),
-    "r":        ((2903,  560), (273, 178)),
-    # 291, not the PSD's 254: the two maps scale differently, and at the
-    # PSD's number this d-pad came out 13% smaller than the Switch map's.
-    # This is the size that matches it on screen.
-    "dpad":     ((1060, 1000), (291, 291)),
-    "stick_l":  ((1466, 1020), (268, 268)),
-    "stick_r":  ((2220, 1020), (255, 255)),
-    "y":        ((2710,  816), (207, 131)),
-    "a":        ((2766, 1022), (232, 232)),
-    "x":        ((2974,  972), (144, 220)),
-    "b":        ((2556, 1132), (154, 154)),
+# Ink, not canvas: every glyph carries its own margin, and a different one
+# per glyph, so sizing by canvas would make a nonsense of the proportions.
+# GC_INK converts between the two, measured off the staged art.
+_GC_FACES_AS_DRAWN = {
+    "y": ((2710,  816), (207, 131)),
+    "a": ((2766, 1022), (232, 232)),
+    "x": ((2974,  972), (144, 220)),
+    "b": ((2556, 1132), (154, 154)),
 }
-
 
 
 def gc_faces(table, bigger, spread):
@@ -2479,168 +2499,94 @@ def gc_faces(table, bigger, spread):
     their distances from A grow with them, by less — the cluster keeps the
     shape it was drawn as, and the gaps it was drawn with.
     """
-    out = dict(table)
+    out = {}
     ax, ay = table["a"][0]
-    for name in ("a", "b", "x", "y"):
-        (px, py), (iw, ih) = table[name]
+    for name, ((px, py), (iw, ih)) in table.items():
         out[name] = ((ax + (px - ax) * spread, ay + (py - ay) * spread),
                      (iw * bigger, ih * bigger))
     return out
 
 
-GC_PSD = gc_faces(_GC_PSD_AS_DRAWN, bigger=1.10, spread=1.06)
-GC_INK = {
-    "l": (0.852, 0.555), "r": (0.852, 0.555), "z": (0.898, 0.453),
-    "start": (0.700, 0.700), "dpad": (0.891, 0.891),
-    "stick_l": (0.727, 0.727), "stick_r": (0.727, 0.727),
-    # The four faces come from the layout mock-up, so these are measured off
-    # what tools/stage-gc-art.py produced, not off the pack.
-    "a": (0.898, 0.898), "b": (0.898, 0.898),
-    "x": (0.590, 0.898), "y": (0.898, 0.570),
+GC_FACES = gc_faces(_GC_FACES_AS_DRAWN, bigger=1.10, spread=1.06)
+# How much of its canvas each glyph's ink takes up, measured off the staged
+# art and keyed the way the art is: no prefix for the Switch set, "gc/" for
+# the GameCube one. Only the glyphs that need it are here — a trigger, whose
+# fill is measured against its ink, and a shape whose box has to be worked
+# back from the ink the layout asked for.
+INK = {
+    "zl": (0.625, 0.688), "zr": (0.625, 0.688),
+    "gc/l": (0.852, 0.555), "gc/r": (0.852, 0.555),
+    "gc/a": (0.898, 0.898), "gc/b": (0.898, 0.898),
+    "gc/x": (0.590, 0.898), "gc/y": (0.898, 0.570),
 }
 
-# One row, four lanes, equal air between them — the same treatment the Switch
-# map gets, and for the same reason: the PSD's own gaps are whatever looked
-# right on a 3556-pixel canvas, and transcribing them literally left the
-# controls small and the C stick touching B. So the PSD sets what each cluster
-# looks like and the lanes set how far apart they sit. A lane is as wide as
-# its contents can ever get, deflection and rings included.
-GC_LANES = (("dpad", "l"), ("stick_l",), ("stick_r",),
-            ("y", "a", "x", "b", "z", "r"))
-# Start belongs to no cluster: it goes midway between the two stick lanes,
-# keeping the offset the PSD gives it from the point between the two.
-GC_STICK_TRAVEL = 0.22          # of a stick's own ink, each way
-GC_MARGIN = 20                  # breathing room round a cluster, PSD pixels
-GC_AIR = 0.035                  # of the strip's width, reserved per gap
 
+def gc_cluster(lay):
+    """(centre, scale) for the face cluster, fitted to the shared face lane.
 
-def gc_extent(names, pad=0):
-    """(lo, hi) in PSD pixels across these controls, plus a margin each side."""
-    lo = min(GC_PSD[n][0][0] - GC_PSD[n][1][0] / 2 for n in names) - pad
-    hi = max(GC_PSD[n][0][0] + GC_PSD[n][1][0] / 2 for n in names) + pad
-    return lo, hi
-
-
-def gc_lane_spans():
-    """Each lane's (centre, width) in PSD pixels, widest contents included."""
-    out = []
-    for names in GC_LANES:
-        pad = 0
-        if names[0].startswith("stick"):
-            pad = GC_PSD[names[0]][1][0] * GC_STICK_TRAVEL
-        elif "a" in names:
-            pad = GC_MARGIN
-        lo, hi = gc_extent(names, pad)
-        out.append(((lo + hi) / 2, hi - lo))
-    return out
-
-
-def gc_scale(g, spans):
-    """Bay pixels per PSD pixel: as big as fits, both ways.
-
-    Width usually decides — a GameCube's controls are spread wider than a
-    Switch's — but the face cluster is tall, so height is checked too and the
-    smaller of the two wins. Getting this wrong in either direction is how a
-    map ends up clipped or marooned in the middle of its bay.
+    The cluster is wider than it is tall and the lane is square, so width
+    decides. Centred on its own bounding box rather than on A, which sits off
+    to one side of it.
     """
-    across = sum(w for _c, w in spans)
-    # Every control the map can draw, so the tallest arrangement is what
-    # gets measured.
-    rows = [(py - ih / 2, py + ih / 2)
-            for (_px, py), (_iw, ih) in GC_PSD.values()]
-    top = min(lo for lo, _hi in rows) - GC_MARGIN
-    down = max(hi for _lo, hi in rows) + GC_MARGIN - top
-    return min(g.dw * (1 - GC_AIR * (len(spans) + 1)) / across,
-               g.dh * 0.98 / down), top, down
+    xs = [(px - iw / 2, px + iw / 2) for (px, _py), (iw, _ih) in GC_FACES.values()]
+    ys = [(py - ih / 2, py + ih / 2) for (_px, py), (_iw, ih) in GC_FACES.values()]
+    lo_x, hi_x = min(a for a, _b in xs), max(b for _a, b in xs)
+    lo_y, hi_y = min(a for a, _b in ys), max(b for _a, b in ys)
+    scale = min(2 * lay.freach / (hi_x - lo_x), 2 * lay.freach / (hi_y - lo_y))
+    return ((lo_x + hi_x) / 2, (lo_y + hi_y) / 2), scale
 
 
 def _gamecube_controls(g, held, axes, swap, holds, wys):
-    """What a GameCube pad has, where a GameCube pad has it.
+    """What a GameCube pad has, where the Switch map has its own.
 
-    The differences from the Switch map are the pad's own, not decoration:
-    two analog shoulders instead of four, Z alone on the right, one Start, and
-    a face cluster built around a big A rather than a diamond. Everything
-    lights by what Dolphin will bind it to — Z is the pad's right shoulder,
-    L and R its triggers — so a press here predicts the press in the game.
+    The differences are the pad's own, not decoration: two analog shoulders
+    instead of four, Z alone on the right, one Start, and a face cluster
+    built around a big A. They sit in the same places as the Switch map's
+    equivalents — the outer pair of the top row are the analog triggers on
+    either pad — so the two screens are the same screen with different
+    lettering. Everything lights by what Dolphin will bind it to, so Z takes
+    either shoulder, and L and R are the triggers.
     """
+    S = g.S
     on = held.__contains__
-    spans = gc_lane_spans()
-    k, top_px, down_px = gc_scale(g, spans)
+    lay = Layout(g)
 
-    air = (g.dw - sum(w for _c, w in spans) * k) / (len(spans) + 1)
-    centres, run = [], g.ox + air
-    for _centre, width in spans:
-        centres.append(run + width * k / 2)
-        run += width * k + air
-    top = g.oy + (g.dh - down_px * k) / 2
+    # Z is one button on a GameCube pad and Dolphin is told to take either
+    # shoulder for it, so it sits in the right shoulder's place and lights
+    # from both. Start takes the middle, between where minus and plus are.
+    draw_top_row(g, lay, (
+        (-lay.TRIGGER, "l", S(0.31), (), 4),
+        (lay.SHOULDER, "z", S(0.31), (BTN_LSHOULDER, BTN_RSHOULDER), None),
+        (lay.TRIGGER, "r", S(0.31), (), 5),
+        (0.0, "start_plain", S(0.21), (BTN_START,), None),
+    ), holds, held, axes)
 
-    def place(name, lane):
-        """(cx, cy, w, h) for one control, in its lane."""
-        (px, py), (iw, ih) = GC_PSD[name]
-        anchor, anchor_px = centres[lane], spans[lane][0]
-        fx, fy = GC_INK[name]
-        return (anchor + (px - anchor_px) * k, top + (py - top_px) * k,
-                iw * k / fx, ih * k / fy)
+    # Quit runs through Start as well, because this pad has no second button
+    # to give it: Start alone starts, Z with it quits. Z being lit says which,
+    # and the ring's colour backs that up — white rather than the obvious red,
+    # because P1 IS red and the two rings came out the same on the one pad
+    # that does the starting.
+    if holds.get(BTN_BACK, 0.0) > 0:
+        hold_ring(g.ui, lay.across(0.0), lay.top_y, S(0.21) * 0.643,
+                  holds[BTN_BACK], FG, g.track)
 
-    def float_place(name):
-        """Start and quit, midway between the two stick lanes."""
-        (px, py), (iw, ih) = GC_PSD[name]
-        anchor = (centres[1] + centres[2]) / 2
-        anchor_px = (spans[1][0] + spans[2][0]) / 2
-        fx, fy = GC_INK[name]
-        return (anchor + (px - anchor_px) * k, top + (py - top_px) * k,
-                iw * k / fx, ih * k / fy)
+    dpad_arms(g, lay.centres[0], lay.row_y, lay.dside, held)
 
-    # L and R are analog on this pad, and Dolphin binds them to the analog
-    # triggers, so they fill rather than switch: how far down a trigger is
-    # holds a game, and a light that is either on or off says nothing about
-    # the half-press that a brake or a shield needs.
-    for name, axis, lane in (("l", 4, 0), ("r", 5, 3)):
-        cx, cy, w, h = place(name, lane)
-        trigger(g, name, cx, cy, w, h, axes.get(axis, 0))
+    for lane, btn, ax, ay, name in ((1, BTN_LSTICK, 0, 1, "stick_l"),
+                                    (2, BTN_RSTICK, 2, 3, "stick_r")):
+        stick(g, lay.centres[lane], lay.row_y, lay.sside, lay.stravel,
+              axes, ax, ay, name, on(btn))
 
-    # Z is one button on a GameCube pad, and Dolphin is told to take either
-    # shoulder for it, so either one lights it here.
-    cx, cy, w, h = place("z", 3)
-    g.glyph("z", cx, cy, w, h,
-            active=on(BTN_LSHOULDER) or on(BTN_RSHOULDER))
-
-    # No START/PAUSE caption: at this size the lettering was unreadable and
-    # it pushed the button off the row's centre line. The plain glyph takes
-    # the hold ring the same way the Switch map's plus does, at the same
-    # proportions, so a hold looks identical on both maps.
-    cx, cy, w, h = float_place("start")
-    g.glyph("start_plain", cx, cy, w, h, active=on(BTN_START))
-
-    # Both of preflight's own gestures run through this one button, because a
-    # GameCube pad has no second one to give them: Start alone starts, Z with
-    # it quits. The ring says how long and Z being lit says which, with the
-    # ring's colour behind that — white rather than the obvious red, because
-    # P1 IS red and the two rings came out the same on the one pad that does
-    # the starting.
-    for btn, colour in ((BTN_START, g.lit), (BTN_BACK, FG)):
-        if holds.get(btn, 0.0) > 0:
-            # Worked back from the button rather than guessed: a dot's own
-            # radius is 0.14 of the ring's, the button's is 0.35 of this box,
-            # and the dots want a gap of about a third of that to sit in. Too
-            # far out and the ring reads as something floating beside the
-            # button; too close and the dots touch it, which is worse — the
-            # lit one merges with the button and the ring looks lopsided.
-            hold_ring(g.ui, cx, cy, w * 0.53, holds[btn], colour, g.track)
-
-    cx, cy, w, _ = place("dpad", 0)
-    dpad_arms(g, cx, cy, w, held)
-
-    for name, btn, ax, ay, lane in (("stick_l", BTN_LSTICK, 0, 1, 1),
-                                    ("stick_r", BTN_RSTICK, 2, 3, 2)):
-        cx, cy, w, _ = place(name, lane)
-        travel = GC_PSD[name][1][0] * GC_STICK_TRAVEL * k
-        stick(g, cx, cy, w, travel, axes, ax, ay, name, on(btn))
-
+    (anchor_x, anchor_y), scale = gc_cluster(lay)
     live = face_live(held, swap)
     for letter, name in (("A", "a"), ("B", "b"), ("X", "x"), ("Y", "y")):
-        cx, cy, w, h = place(name, 3)
-        g.face(name, cx, cy, w, h, pressed=letter in live, wys=wys)
+        (px, py), (iw, ih) = GC_FACES[name]
+        fx, fy = INK[g.art + name]
+        g.face(name,
+               lay.centres[3] + (px - anchor_x) * scale,
+               lay.row_y + (py - anchor_y) * scale,
+               iw * scale / fx, ih * scale / fy,
+               pressed=letter in live, wys=wys)
 
 
 def dpad_arms(g, cx, cy, side, held):
@@ -2695,7 +2641,7 @@ def trigger(g, name, cx, cy, w, h, value):
     frac = min(1.0, max(0.0, value / 32767.0))
     if frac <= 0.005:
         return
-    ink = h * GC_INK[name][1]
+    ink = h * INK[g.art + name][1]
     floor = cy + ink / 2
     top = floor - ink * frac
     g.glyph(name, cx, cy, w, h, active=True,
@@ -2755,7 +2701,7 @@ AXIS_NAMES = {0: "Left X", 1: "Left Y", 2: "Right X", 3: "Right Y",
 GLYPH_ART = {
     "+": "plus", "\u2013": "minus",
     "L3": "stick_side_l", "R3": "stick_side_r",
-    "L": "l", "R": "r",
+    "L": "l", "R": "r", "ZL": "zl", "ZR": "zr",
     # The GameCube set. A scale comes with the ones whose ink is short and
     # wide — a pill drawn in the same square box as a circle reads as the
     # smaller control, which is backwards for a shoulder button.
@@ -2996,7 +2942,7 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
         items = [
             (["+"], "P1", p1c, "hold to start"),
             claim,
-            (["L", "sep+", "R"], None, anyone, "swap ABXY"),
+            (["ZL", "sep+", "ZR"], None, anyone, "swap ABXY"),
             (["\u2013"], "P1", p1c, "hold to quit"),
         ]
     glyph_bar(ui, items, hidden={1} if p1_claimed else ())
@@ -3023,25 +2969,28 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube"}
 
 
-# Both triggers, firmly, mirrors the face buttons. The legend draws L and R
-# and on this pad those ARE the triggers — the shoulders are Z — so binding
-# the gesture to the shoulders sent a player to the wrong pair of controls.
-# That is how it was found. Two thresholds so a trigger resting just under
-# the line cannot rattle the mapping back and forth.
+# Both triggers, firmly, mirrors the face buttons — on either map. It was the
+# two shoulders once, which is wrong on a GameCube pad twice over: the legend
+# draws L and R and those ARE the triggers there, and both shoulders together
+# are Z, so flipping the mapping as a side effect of pressing Z was a trap.
+# The triggers are ZL and ZR on a Switch pad, so one gesture covers both and a
+# player who learns it on one screen knows it on the other. Two thresholds, so
+# a trigger resting just under the line cannot rattle the mapping back and
+# forth.
 GC_SWAP_ON = 24000
 GC_SWAP_OFF = 8000
 
 
-def update_gc_swap(pads, armed):
+def update_trigger_swap(pads, armed):
     """Flip the face mapping of any pad squeezing both triggers.
 
     Returns True if anything changed, so the caller can save it. Axes carry
     no press events, so this is judged from the values every frame rather
-    than from an SDL button-down like the Switch map's L+R.
+    than from an SDL button-down.
     """
     changed = False
     for pad in pads:
-        key = (pad.key, "gc-swap")
+        key = (pad.key, "trigger-swap")
         low = pad.axes.get(sdlui.AXIS_TRIGGERLEFT, 0)
         high = pad.axes.get(sdlui.AXIS_TRIGGERRIGHT, 0)
         if low > GC_SWAP_ON and high > GC_SWAP_ON:
@@ -3238,7 +3187,7 @@ def main():
     HOLD_MS = 1100
     PRESS_LOG_LIMIT = 60
     holding = {}            # (pad key, button) -> tick the hold began
-    combo_armed = set()     # pads whose L+R has already fired this press
+    armed = set()           # pads whose trigger squeeze has already fired
     # What the pad actually sent, which is not always what is printed on it:
     # a remapping layer between the two shows up here and nowhere else.
     # Capped, because a family testing every button would otherwise fill the
@@ -3299,10 +3248,10 @@ def main():
                 warnings.append("No controllers detected. Wake one and it "
                                 "will appear here.")
 
+            if update_trigger_swap(pads, armed):
+                remember(pads, known)
             if layout_for(backend) == "gamecube":
                 update_gc_holds(pads, holding, now)
-                if update_gc_swap(pads, combo_armed):
-                    remember(pads, known)
 
             holds = {}
             for (pkey, btn), started in list(holding.items()):
@@ -3352,8 +3301,8 @@ def main():
                 for p in pads:
                     if p.instance_id == inst:
                         p.held.discard(btn)
-                        if btn in (BTN_LSHOULDER, BTN_RSHOULDER):
-                            combo_armed.discard(p.key)
+                        # The swap gesture disarms on its own, from the axis
+                        # values: nothing to clear here for it.
                         holding.pop((p.key, btn), None)
             elif kind == "axis":
                 inst, axis, value = payload
@@ -3393,20 +3342,6 @@ def main():
                     if btn == BTN_B:
                         state = "exit"
                     continue
-
-                # Any player may mirror their own face buttons with L+R.
-                # Not on the GameCube map: there both shoulders are Z, and
-                # flipping the mapping as a side effect of pressing Z would
-                # be a trap. The triggers do it there, as the legend says.
-                if (layout_for(backend) != "gamecube"
-                        and btn in (BTN_LSHOULDER, BTN_RSHOULDER)
-                        and BTN_LSHOULDER in pad.held
-                        and BTN_RSHOULDER in pad.held
-                        and pad.key not in combo_armed):
-                    combo_armed.add(pad.key)
-                    pad.swap_faces = not pad.swap_faces
-                    pad.swap_explicit = True
-                    remember(pads, known)
 
                 # Claim Player 1. Deliberately one-shot: without the lock a
                 # second player could keep taking the slot back, which is

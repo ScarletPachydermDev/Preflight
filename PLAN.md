@@ -180,6 +180,27 @@ belonged to whichever controller Steam parked in that slot last time.
 rejoins at the end rather than reclaiming its old slot — whoever took over
 while it was away keeps their place.
 
+**One skeleton, many maps** (2026-09-16). `Layout` holds where the controls
+go — the two rows, the four lanes, the sizes, and the offsets across the top
+row measured out from the point between the sticks — and BOTH maps draw into
+it. Only the glyphs differ. That is deliberate and it is the thing to protect:
+a player who has read one of these screens should be able to read the next
+one, and the next one is coming (an N64 map for Gopher64 was asked about the
+day this landed).
+
+Adding a map is therefore: an art set under `art/<name>/`, a
+`_<name>_controls(g, held, axes, swap, holds, wys)` that draws into `Layout`,
+and a row in `BACKEND_LAYOUT`. The top row is positioned by ROLE rather than
+by name — `Layout.TRIGGER`, `SHOULDER`, `INNER` — so the analog triggers land
+in the same two places whatever the pad calls them, which is how a GameCube's
+L and R sit where a Switch's ZL and ZR do. Where a pad has fewer controls,
+leave the slot empty rather than moving the others: a GameCube has one Start
+where the Switch map has minus and plus, and it goes between them.
+
+The one part a new map really does own is its cluster. `gc_cluster` fits the
+GameCube's four buttons into the shared face lane from the PSD's own pixels;
+an N64's would do the same with its own numbers.
+
 **The top row hangs off the sticks, not the middle of the strip** (Switch
 map, 2026-09-16). Those are not the same point: the face cluster's lane is
 wider than the d-pad's, so the row of lanes sits left of the strip's centre,
@@ -266,14 +287,15 @@ controls have to be reachable on the map being drawn**:
   obvious red, because P1 *is* red and the two rings came out identical on
   the one pad that does the starting. The physical Back button still quits,
   as a way out if a pad's shoulders are being remapped out from under us.
-* **Swap ABXY.** On the Switch map it is the two shoulders. On this one the
-  shoulders are Z, so the gesture is the two analog triggers — which is what
-  the legend draws there, and drawing L and R for a gesture bound to the
-  shoulders sent a player straight to the wrong pair of controls. The
-  shoulder gesture is disabled on this map: flipping the face mapping as a
-  side effect of pressing Z would be a trap. Axes carry no press events, so
-  it is judged from the values each frame, with separate on and off
-  thresholds so a trigger resting near the line cannot rattle the mapping.
+* **Swap ABXY.** Both analog triggers, on every map. It was the two shoulders
+  once, which is wrong on a GameCube pad twice over: the legend draws L and R
+  and those ARE the triggers there, so a player went to the wrong pair of
+  controls; and both shoulders together are Z, so flipping the face mapping
+  as a side effect of pressing Z was a trap. The triggers are ZL and ZR on a
+  Switch pad, so one gesture covers both maps and the legend just letters it
+  differently. Axes carry no press events, so it is judged from the values
+  each frame, with separate on and off thresholds so a trigger resting near
+  the line cannot rattle the mapping.
 
 **A caution about this map and Dolphin.** Preflight reads SDL, which under
 Steam Input means the virtual pad; Dolphin is bound to the physical device
