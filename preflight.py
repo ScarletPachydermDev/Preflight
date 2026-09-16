@@ -2307,6 +2307,33 @@ class Bay:
                       cx - w / 2, cy - h / 2, w, h,
                       color or (self.lit if active else self.idle), clip=clip)
 
+    def face(self, name, cx, cy, w, h=None, pressed=False, wys=None):
+        """A face button, in three layers.
+
+        The button's own outline carries the answer to "is this label telling
+        the truth" — green when it is, amber when it is not. A press fills the
+        button from inside that line, so the colour survives it, and the label
+        goes on last in white so it stays readable either way. All three
+        layers come from one glyph, so nothing can drift out of line with
+        anything else.
+
+        The fill used to knock the label out of itself, for a negative. It
+        reads well on a GameCube's big A and not at all on a Switch's small
+        circles, where Kenney's letter is nearly as wide as the room left
+        inside the ring and a press came out as two red crescents.
+
+        An empty bay has no answer to give, so its outline stays dim and its
+        label is left as part of the glyph.
+        """
+        h = w if h is None else h
+        self.glyph(name, cx, cy, w, h,
+                   color=None if wys is None else
+                   (RING_OK if wys else RING_BAD))
+        if pressed:
+            self.glyph(name + "_press", cx, cy, w, h, color=self.lit)
+        if wys is not None:
+            self.glyph(name + "_letter", cx, cy, w, h, color=FG)
+
 
 def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
                  dim=False, holds=None, wys=None, layout="switch"):
@@ -2336,21 +2363,7 @@ def _switch_controls(g, held, axes, swap, holds, wys):
     on = held.__contains__
     button = g.glyph
 
-    # Top strip: triggers and shoulders in the outer corners, minus/plus in
-    # the middle. Kept in one row so the columns below stay clear.
-    for xf, name, btn, axis in ((0.075, "zl", None, 4),
-                                (0.215, "l", BTN_LSHOULDER, None),
-                                (0.785, "r", BTN_RSHOULDER, None),
-                                (0.925, "zr", None, 5)):
-        active = on(btn) if btn is not None else axes.get(axis, 0) > 8000
-        button(name, X(xf), Y(0.085), S(0.31), active=active)
-
-    for xf, btn, name in ((0.405, BTN_BACK, "minus"), (0.595, BTN_START, "plus")):
-        button(name, X(xf), Y(0.085), S(0.21), active=on(btn))
-        held_for = holds.get(btn, 0.0)
-        if held_for > 0:
-            hold_ring(g.ui, X(xf), Y(0.085), S(0.135), held_for, lit, g.track)
-
+    # The row below is laid out first, because the top row hangs off it.
     # One row, four lanes, equal air between them — the PSD puts the d-pad,
     # both sticks and the cluster on a single centre line. Each lane is as
     # wide as its content can ever get: a stick at full deflection, the face
@@ -2362,8 +2375,10 @@ def _switch_controls(g, held, axes, swap, holds, wys):
     stravel = sside * 0.28
     fside = S(0.30)
     fspread = S(0.215)
-    ring_t = max(2.0, S(0.026))
-    freach = fspread + fside * 0.375 + ring_t
+    # Measured off the art: the glyph's own circle ends at 0.375 of the box
+    # side, 96px of ink in a 128px canvas. It used to need a band on top of
+    # that for a separate ring; the outline carries the colour itself now.
+    freach = fspread + fside * 0.375
 
     lanes = (dside, sside + 2 * stravel, sside + 2 * stravel, 2 * freach)
     air = (g.dw - sum(lanes)) / (len(lanes) + 1)
@@ -2372,6 +2387,36 @@ def _switch_controls(g, held, axes, swap, holds, wys):
         centres.append(run + lane / 2)
         run += lane + air
     row_y = Y(0.635)
+
+    # Triggers and shoulders in the outer corners, minus and plus in the
+    # middle — one row, so the columns below stay clear. Hung off the point
+    # midway BETWEEN THE STICKS rather than the middle of the strip, because
+    # those are not the same point: the face cluster's lane is wider than the
+    # d-pad's, so the row below sits left of centre, and a top row centred on
+    # the strip was visibly out of line with it. Scaled to whatever fits once
+    # it is off-centre, keeping its own spacing.
+    mid = (centres[1] + centres[2]) / 2
+    reach = min(mid - g.ox, g.ox + g.dw - mid) - S(0.31) / 2
+    fit = min(1.0, reach / S(1.02))
+    top_y = Y(0.085)
+
+    def across(offset):
+        return mid + offset * fit * g.dh
+
+    for offset, name, btn, axis in ((-1.02, "zl", None, 4),
+                                    (-0.684, "l", BTN_LSHOULDER, None),
+                                    (0.684, "r", BTN_RSHOULDER, None),
+                                    (1.02, "zr", None, 5)):
+        active = on(btn) if btn is not None else axes.get(axis, 0) > 8000
+        button(name, across(offset), top_y, S(0.31), active=active)
+
+    for offset, btn, name in ((-0.228, BTN_BACK, "minus"),
+                              (0.228, BTN_START, "plus")):
+        button(name, across(offset), top_y, S(0.21), active=on(btn))
+        held_for = holds.get(btn, 0.0)
+        if held_for > 0:
+            hold_ring(g.ui, across(offset), top_y, S(0.135), held_for, lit,
+                      g.track)
 
     # The directional art is the same cross with one arm marked, so a pressed
     # direction goes straight over the idle cross — a diagonal shows both arms
@@ -2389,15 +2434,8 @@ def _switch_controls(g, held, axes, swap, holds, wys):
     fcx, fcy = centres[3], row_y
     for letter, name, dx, dy in (("X", "x", 0, -1), ("Y", "y", -1, 0),
                                  ("A", "a", 1, 0), ("B", "b", 0, 1)):
-        cx, cy = fcx + dx * fspread, fcy + dy * fspread
-        if wys is not None:
-            # Concentric by construction, and touching: measured off the art,
-            # the glyph's own circle ends at 0.375 of the box side (96px of
-            # ink in a 128px canvas), so the ring starts exactly there.
-            inner = fside * 0.375
-            g.ui.ring(cx, cy, inner, inner + ring_t,
-                      RING_OK if wys else RING_BAD)
-        button(name, cx, cy, fside, active=letter in live)
+        g.face(name, fcx + dx * fspread, fcy + dy * fspread, fside,
+               pressed=letter in live, wys=wys)
 
     # sticks: a dim well with a knob that actually moves
     for lane, btn, ax, ay, name in ((1, BTN_LSTICK, 0, 1, "stick_l"),
@@ -2602,19 +2640,7 @@ def _gamecube_controls(g, held, axes, swap, holds, wys):
     live = face_live(held, swap)
     for letter, name in (("A", "a"), ("B", "b"), ("X", "x"), ("Y", "y")):
         cx, cy, w, h = place(name, 3)
-        # The button's own outline carries the answer on this pad: green when
-        # the label tells the truth, amber when it does not. Not one of these
-        # four is a circle, so a ring round them would be a guess at a shape,
-        # and the grown-silhouette halo that replaced it was a second outline
-        # fighting the first. Colouring the ink is exact — and it is what the
-        # mock-up asked for.
-        g.glyph(name, cx, cy, w, h,
-                color=g.idle if wys is None else
-                (RING_OK if wys else RING_BAD))
-        if letter in live:
-            # The filled twin is a shade smaller than the outline, so a press
-            # reads as a negative inside a ring that stays where it was.
-            g.glyph(name, cx, cy, w, h, active=True)
+        g.face(name, cx, cy, w, h, pressed=letter in live, wys=wys)
 
 
 def dpad_arms(g, cx, cy, side, held):
@@ -2926,10 +2952,9 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
             swap_icon(ui, cx + cw - int(ch * 0.13), cy + int(ch * 0.13),
                       ch * 0.15, col)
 
-        # The GameCube map hangs lower than the Switch one — B sits below the
-        # cluster, where the Switch map has nothing — so it is drawn higher in
-        # the bay and its label sits lower, or the two very nearly touch.
-        top, under = (0.15, 0.13) if layout == "gamecube" else (0.20, 0.17)
+        # High in the bay, with the label well under it: at the old spacing
+        # the lowest buttons very nearly touched the controller's name.
+        top, under = 0.15, 0.13
         pw, ph = int(cw * 0.92), int(ch * 0.62)
         card_bg = blend(BG, col, 0.30 if buzzing else 0.10)
         draw_gamepad(ui, cx + (cw - pw) / 2, cy + ch * top, pw, ph, col,

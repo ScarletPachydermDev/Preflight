@@ -180,6 +180,16 @@ belonged to whichever controller Steam parked in that slot last time.
 rejoins at the end rather than reclaiming its old slot — whoever took over
 while it was away keeps their place.
 
+**The top row hangs off the sticks, not the middle of the strip** (Switch
+map, 2026-09-16). Those are not the same point: the face cluster's lane is
+wider than the d-pad's, so the row of lanes sits left of the strip's centre,
+and a top row placed at fixed fractions of the strip was visibly out of line
+with everything below it. It is now mirrored about the midpoint between the
+two stick lanes and scaled to whatever fits once it is off-centre, keeping
+its own spacing. Both maps are also drawn higher in their bay, with the
+controller's name further below: at the old spacing the lowest buttons very
+nearly touched it.
+
 **The map follows the emulator, not the pad in the player's hands**
 (2026-09-15). Dolphin gets a GameCube map: one Start, Z on its own, two analog
 shoulders, and a cluster built round a big A. It lights by what Dolphin will
@@ -204,11 +214,25 @@ wrong first:
   NOT taken from the PSD: the two maps scale differently and the PSD's number
   came out 13% smaller than the Switch map's, so the table carries the size
   that matches on screen instead.
-* **A wysiwyg ring is the button's own outline, recoloured.** Not one of A,
-  B, X, Y is a circle on this pad, so the annulus the Switch map uses has
-  nothing to be concentric with. A grown copy of the filled silhouette behind
-  each button was tried and read as a second outline fighting the first;
-  painting the ink itself green or amber is exact and needs no extra art.
+* **A wysiwyg ring is the button's own outline, recoloured, on BOTH maps.**
+  Not one of A, B, X, Y is a circle on a GameCube pad, so the annulus the
+  Switch map used had nothing to be concentric with. A grown copy of the
+  filled silhouette behind each button was tried and read as a second outline
+  fighting the first; painting the ink itself green or amber is exact. The
+  Switch map was brought onto the same footing once the same mock-up arrived
+  for it (2026-09-16), so `Bay.face` now draws both maps: outline in the
+  wysiwyg colour, a press filling it from inside that line, and the label
+  last in white.
+
+  The fill used to knock the label out of itself, for a negative. That reads
+  well on a GameCube's big A and not at all on a Switch's small circles,
+  where Kenney's letter is nearly as wide as the room inside the ring and a
+  press came out as two crescents. Two traps in deriving those fills, both
+  hit: measure the ring's thickness on the **ring alone**, since the whole
+  glyph's thickest part is its letter; and **close the letter's hole first**,
+  because Kenney's filled art already has one and eroding it leaves a dark
+  letter-shaped halo round the white one.
+
 * **The face buttons come from the layout mock-up, and their presses are cut
   from themselves.** `tools/stage-gc-art.py` slices the four blobs out of
   `green gc.png`, repaints them white so they can tint, thins them all to

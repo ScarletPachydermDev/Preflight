@@ -180,7 +180,10 @@ Player 1; `L3`+`R3` takes that spot if you are not. It locks after one use so
 nobody can keep taking it back.
 
 ABXY are Nintendo controller layout and is set by default WSIWYG,
-press the button marked A and the circle marked A lights. If you would rather match physical position than labels, `L`
+press the button marked A and the circle marked A lights. Each button's own
+outline carries the answer: **green** when the label is telling the truth,
+**amber** when it is not. A press fills the button in the player's colour from
+inside that outline, so the colour is still there while you hold it. If you would rather match physical position than labels, `L`
 +`R` mirrors it for your pad only, and Preflight remembers.
 
 Colours and rumble pacing live in `~/.config/preflight/theme.json`.
@@ -221,6 +224,10 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 started fine and the problem is elsewhere. If there is no entry at all, Steam
 never launched it — Steam sometimes believes a shortcut is still running and
 the Play button silently does nothing, which a Steam restart clears.
+
+`tools/stage-art.py` rebuilds the button glyphs — the GameCube set from
+Zacksly's pack and the layout mock-up, and two derived layers for the Switch
+set from the art already committed. It is safe to run twice.
 
 `shot.py` renders the check screen to a PNG instead of the TV, which is how
 a layout change gets checked: `./shot.py out.png --pads 4`. It can draw either

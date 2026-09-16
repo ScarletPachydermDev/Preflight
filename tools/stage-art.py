@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Stage the GameCube button glyphs into art/gc/ from Zacksly's pack.
+"""Stage the button glyphs preflight draws, for both maps.
 
 The pack is not vendored — only the handful of files preflight draws, under
 the names the code asks for. Run it again with the pack unzipped somewhere
 to rebuild them:
 
-    ./tools/stage-gc-art.py "~/Downloads/GameCube Button Icons and Controls" \\
-                            "~/Downloads/green gc.png"
+    ./tools/stage-art.py "~/Downloads/GameCube Button Icons and Controls" \\
+                         "~/Downloads/green gc.png"
 
 Two things happen on the way in, and both count as modifications under
 CC BY 3.0, so they are stated here and in art/gc/LICENSE-zacksly.txt:
@@ -24,8 +24,14 @@ CC BY 3.0, so they are stated here and in art/gc/LICENSE-zacksly.txt:
 
 Idle glyphs come from Buttons Outline; the `_on` twins come from Buttons
 Full Solid, whose letter is knocked out of the silhouette — that is what
-makes a press read as the player's colour with the label showing the bay
-through it, the same trick the Switch set uses.
+makes a press read as the player's colour with the label showing through it.
+
+The Switch set in art/ needs no pack: its face buttons are already the right
+shapes, and what is derived from them here are the two extra layers both maps
+draw — `<n>_letter` so a label can stay white while the outline round it
+turns green or amber, and `<n>_press` so a press fills the button from inside
+without painting over that outline. Both are written from the committed art,
+so running this twice is harmless.
 """
 
 import os
@@ -333,7 +339,7 @@ def face(blob, pack, key, canvas=256, fill=0.90):
     suit the tilt of a real pad, which reads as a mistake once the blobs are
     drawn square.
 
-    Returns (outline, filled).
+    Returns (outline, filled, letter).
     """
     src = FACES[key]
     _shape, letter = split_letter(load(pack, "Buttons Outline", src))
@@ -362,11 +368,42 @@ def face(blob, pack, key, canvas=256, fill=0.90):
                          int(round(cy - mark.height / 2))))
 
     out.alpha_composite(stamped)
-    # A filled glyph wears its label as a hole, so the letter is subtracted
-    # there: that is what makes a press read as a negative of the button.
-    filled.putalpha(ImageChops.subtract(filled.getchannel("A"),
-                                        stamped.getchannel("A")))
-    return out, filled
+    return out, filled, stamped
+
+
+SWITCH_FACES = ("a", "b", "x", "y")
+SWITCH_DIR = os.path.join(HERE, "art")
+
+
+def switch_faces():
+    """The Switch set's two derived layers, from the art already committed.
+
+    Kenney's filled twin is exactly the same size as its outline, so drawing
+    it over a recoloured outline painted the colour out. `_press` is that
+    twin brought inside the line instead; `_letter` is the label on its own,
+    for drawing back in white on top of both.
+    """
+    for key in SWITCH_FACES:
+        outline = Image.open(os.path.join(SWITCH_DIR, key + ".png")).convert("RGBA")
+        filled = Image.open(os.path.join(SWITCH_DIR, key + "_on.png")).convert("RGBA")
+        _ring, letter = split_letter(outline)
+        if letter is None:
+            sys.exit(f"art/{key}.png: expected a letter inside the outline")
+        letter.save(os.path.join(SWITCH_DIR, key + "_letter.png"))
+
+        # Kenney's filled twin wears its own label as a hole. The label goes
+        # on top in white now, so the hole is closed first — left in, it
+        # showed as a dark letter-shaped halo around the white one.
+        closed, _hole = fill_holes(filled)
+        # Measured off the RING alone: the whole glyph's thickest part is the
+        # letter, and eroding by that much left a crescent of fill around it
+        # rather than a filled button.
+        inside = closed.getchannel("A").point(lambda v: 255 if v >= 128 else 0)
+        for _ in range(stroke_erosions(_ring) * 2 + 3):
+            inside = inside.filter(ImageFilter.MinFilter(3))
+        press = Image.new("RGBA", filled.size, (255, 255, 255, 0))
+        press.putalpha(inside.filter(ImageFilter.GaussianBlur(0.6)))
+        press.save(os.path.join(SWITCH_DIR, key + "_press.png"))
 
 
 def load(pack, folder, name):
@@ -400,9 +437,12 @@ def main():
     # The face buttons, from the mock-up's blobs.
     blobs = mockup_blobs(mock)
     for key in FACES:
-        outline, filled = face(blobs[key], pack, key)
+        outline, filled, mark = face(blobs[key], pack, key)
         outline.save(os.path.join(OUT, key + ".png"))
-        filled.save(os.path.join(OUT, key + "_on.png"))
+        filled.save(os.path.join(OUT, key + "_press.png"))
+        mark.save(os.path.join(OUT, key + "_letter.png"))
+
+    switch_faces()
 
     for src, dst in (("LICENSE.txt", "LICENSE-zacksly.txt"),):
         with open(os.path.join(pack, src), encoding="utf-8", errors="replace") as fh:
@@ -414,8 +454,9 @@ def main():
                      "rotated a quarter turn so it stands on its end as it "
                      "does on a real GameCube pad. See tools/stage-gc-art.py.\n")
 
-    print(f"staged {len(OUTLINE) + len(PRESSED) + 2 * len(FACES) + 3} "
-          f"files into {OUT}")
+    print(f"staged {len(OUTLINE) + len(PRESSED) + 3 * len(FACES) + 3} files "
+          f"into {OUT}, plus {2 * len(SWITCH_FACES)} derived in "
+          f"{SWITCH_DIR}")
 
 
 if __name__ == "__main__":
