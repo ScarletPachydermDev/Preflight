@@ -148,8 +148,6 @@ Run it if something looks wrong and you want the full picture.
 
 ## Credits
 
-Button art is [Kenney](https://kenney.nl)'s *Input Prompts* (CC0) throughout,
-Switch and GameCube both — one hand at one weight is why the two maps read as
-the same screen, and why they are legible from a sofa at all.
+Button art is [Kenney](https://kenney.nl)'s *Input Prompts* (CC0).
 
 Built with [Claude Code](https://claude.com/claude-code).
