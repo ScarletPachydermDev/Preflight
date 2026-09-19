@@ -1085,6 +1085,7 @@ BACKENDS = {
     "wheelwizard": ("wheelwizard",),
     "dolphin": ("dolphin",),
     "eden": ("eden",),
+    "cemu": ("cemu",),
 }
 
 
@@ -1769,6 +1770,273 @@ def write_eden_config(cfg_path, pads, sdl):
             BACKUP_DIR, f"qt-config.{time.strftime('%Y%m%d-%H%M%S')}.ini"))
     if not set_ini_keys(cfg_path, "Controls", values):
         return ["could not write the [Controls] section of qt-config.ini"]
+    return []
+
+
+# --------------------------------------------------------------------- cemu
+
+CEMU_APP_ID = "info.cemu.Cemu"
+
+# Everything below is read out of Cemu's own source at tag v2.6 (src/input/),
+# not out of a saved profile: InputManager::load/save for the file,
+# VPADController.h and ProController.h for the mapping ids, Controller.h's
+# Buttons2 for the button codes, and VPADController::set_default_mapping for
+# which SDL code each control takes.
+#
+# Player 1 is the GamePad and everyone else a Pro Controller, because that is
+# the Wii U: one GamePad, and multiplayer games take Pro Controllers for the
+# rest. The two number their controls differently — the Pro Controller has
+# Home between Minus and the d-pad — so each gets its own table.
+CEMU_VPAD = {"a": 1, "b": 2, "x": 3, "y": 4, "l": 5, "r": 6, "zl": 7, "zr": 8,
+             "plus": 9, "minus": 10, "up": 11, "down": 12, "left": 13,
+             "right": 14, "stick_l": 15, "stick_r": 16,
+             "l_up": 17, "l_down": 18, "l_left": 19, "l_right": 20,
+             "r_up": 21, "r_down": 22, "r_left": 23, "r_right": 24}
+CEMU_PRO = {"a": 1, "b": 2, "x": 3, "y": 4, "l": 5, "r": 6, "zl": 7, "zr": 8,
+            "plus": 9, "minus": 10, "up": 12, "down": 13, "left": 14,
+            "right": 15, "stick_l": 16, "stick_r": 17,
+            "l_up": 18, "l_down": 19, "l_left": 20, "l_right": 21,
+            "r_up": 22, "r_down": 23, "r_left": 24, "r_right": 25}
+
+# Buttons2: 0-31 are SDL's own button numbers, then the axes. Triggers are
+# the positive half of the trigger pair, sticks both halves of axis (left)
+# and rotation (right), negative Y being up.
+CEMU_SDL = {"l": 9, "r": 10, "zl": 42, "zr": 43, "plus": 6, "minus": 4,
+            "up": 11, "down": 12, "left": 13, "right": 14,
+            "stick_l": 7, "stick_r": 8,
+            "l_up": 45, "l_down": 39, "l_left": 44, "l_right": 38,
+            "r_up": 47, "r_down": 41, "r_left": 46, "r_right": 40}
+# Same sense as FACE_IDENTITY: identity is what-you-see-is-what-you-get, SDL's
+# A for the Wii U's A — Cemu's own default for a Switch Pro Controller.
+# Mirrored is Cemu's default for every other pad, which goes by position.
+CEMU_FACE_IDENTITY = {"a": 0, "b": 1, "x": 2, "y": 3}
+CEMU_FACE_MIRRORED = {"a": 1, "b": 0, "x": 3, "y": 2}
+
+# Cemu counts only devices SDL recognises as game controllers when it numbers
+# pads that share a GUID, so this does too; a stray joystick would otherwise
+# shift every ordinal after it.
+CEMU_ENUM = r"""
+import ctypes, sys
+sdl = ctypes.CDLL(sys.argv[1])
+class G(ctypes.Structure):
+    _fields_ = [("d", ctypes.c_uint8 * 16)]
+sdl.SDL_SetHint(b"SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", b"1")
+sdl.SDL_Init(0x00000200 | 0x00002000)
+sdl.SDL_JoystickGetDeviceGUID.restype = G
+sdl.SDL_JoystickGetDeviceGUID.argtypes = [ctypes.c_int]
+sdl.SDL_JoystickGetGUIDString.argtypes = [G, ctypes.c_char_p, ctypes.c_int]
+sdl.SDL_GameControllerNameForIndex.restype = ctypes.c_char_p
+seen = {}
+for i in range(sdl.SDL_NumJoysticks()):
+    if not sdl.SDL_IsGameController(i):
+        continue
+    b = ctypes.create_string_buffer(33)
+    sdl.SDL_JoystickGetGUIDString(sdl.SDL_JoystickGetDeviceGUID(i), b, 33)
+    guid = b.value.decode()
+    n = seen.get(guid, 0)
+    seen[guid] = n + 1
+    name = sdl.SDL_GameControllerNameForIndex(i) or b"?"
+    print(n, guid, name.decode(errors="replace"), sep="\t")
+sdl.SDL_Quit()
+"""
+
+
+def find_cemu_sdl(app_id=None):
+    """The libSDL2 Cemu's flatpak links against: the runtime its own metadata
+    names, in whichever installation holds it. Not simply the newest one
+    installed — 26.08 sat beside Cemu's 25.08 on the machine, and a newer
+    SDL is exactly how ids stop matching (§3)."""
+    import glob
+    roots = (os.path.expanduser("~/.local/share/flatpak"), "/var/lib/flatpak")
+    runtime = None
+    for root in roots:
+        try:
+            with open(f"{root}/app/{app_id or CEMU_APP_ID}/current/active/metadata") as fh:
+                for line in fh:
+                    if line.startswith("runtime="):
+                        runtime = line.split("=", 1)[1].strip()
+                        break
+        except OSError:
+            continue
+        if runtime:
+            break
+    if not runtime:
+        return None
+    for root in roots:
+        hits = sorted(glob.glob(f"{root}/runtime/{runtime}/active/files/lib/*/libSDL2-2.0.so.0"))
+        if hits:
+            return hits[0]
+    return None
+
+
+def cemu_devices():
+    """[(ordinal, guid, name)] as Cemu numbers them."""
+    lib = find_cemu_sdl() or "libSDL2-2.0.so.0"
+    env = dict(os.environ)
+    env.pop("SDL_GAMECONTROLLER_IGNORE_DEVICES", None)
+    try:
+        out = subprocess.run([sys.executable, "-c", CEMU_ENUM, lib], env=env,
+                             capture_output=True, text=True, timeout=20)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    rows = []
+    for line in out.stdout.splitlines():
+        bits = line.split("\t")
+        if len(bits) == 3 and bits[0].isdigit():
+            rows.append((int(bits[0]), bits[1], bits[2]))
+    return rows or None
+
+
+def cemu_uuid(pad, rows, used):
+    """Cemu's name for a pad: which of the pads sharing its GUID it is, then
+    the GUID — "0_0300...". Matched on the GUID Cemu's own SDL reports, and
+    on vendor/product with the name-CRC when the two SDLs disagree, as they
+    do across versions (§3)."""
+    for exact in (True, False):
+        for n, guid, _name in rows or ():
+            key = f"{n}_{guid}"
+            if key in used:
+                continue
+            if exact and guid != pad.sdl_guid:
+                continue
+            if not exact and (guid_vendor_product(guid) != (pad.vendor, pad.product)
+                              or guid_name_crc(guid) != pad.name_crc):
+                continue
+            used.add(key)
+            return key
+    return f"0_{pad.sdl_guid}"
+
+
+def cemu_profile(pad, uuid, gamepad):
+    """One controllerN.xml, laid out the way Cemu's own save() writes it."""
+    ids = CEMU_VPAD if gamepad else CEMU_PRO
+    kind = "Wii U GamePad" if gamepad else "Wii U Pro Controller"
+    codes = dict(CEMU_SDL, **(CEMU_FACE_MIRRORED if pad.swap_faces
+                             else CEMU_FACE_IDENTITY))
+    entries = "".join(
+        f"\t\t\t<entry>\n\t\t\t\t<mapping>{ids[k]}</mapping>\n"
+        f"\t\t\t\t<button>{codes[k]}</button>\n\t\t\t</entry>\n"
+        for k in sorted(ids, key=ids.get))
+    name = xml_escape(pad.label)
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<emulated_controller>\n"
+            f"\t<type>{kind}</type>\n"
+            "\t<controller>\n"
+            "\t\t<api>SDLController</api>\n"
+            f"\t\t<uuid>{uuid}</uuid>\n"
+            f"\t\t<display_name>{name}</display_name>\n"
+            "\t\t<axis>\n\t\t\t<deadzone>0.25</deadzone>\n\t\t\t<range>1</range>\n\t\t</axis>\n"
+            "\t\t<rotation>\n\t\t\t<deadzone>0.25</deadzone>\n\t\t\t<range>1</range>\n\t\t</rotation>\n"
+            "\t\t<trigger>\n\t\t\t<deadzone>0.25</deadzone>\n\t\t\t<range>1</range>\n\t\t</trigger>\n"
+            "\t\t<mappings>\n" + entries + "\t\t</mappings>\n"
+            "\t</controller>\n"
+            "</emulated_controller>\n")
+
+
+def xml_escape(text):
+    return (text.replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
+def cemu_config_target(app_id=None, exe=None):
+    """Cemu's controllerProfiles folder. Portable beside the binary, else its
+    flatpak sandbox, else ~/.config — and never one standing in for another,
+    for the reason find_config gives."""
+    if exe:
+        portable = os.path.join(os.path.dirname(os.path.abspath(exe)), "portable")
+        if os.path.isdir(portable):
+            return os.path.join(portable, "controllerProfiles")
+        return os.path.expanduser("~/.config/Cemu/controllerProfiles")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or CEMU_APP_ID}/config/Cemu/controllerProfiles")
+
+
+CEMU_SLOTS = 8      # controller0 .. controller7
+
+
+# Which games play with P1 as a Pro Controller, by ROM file name. The GamePad
+# is the default because many Wii U games will not start without one; but a
+# game that offers both — Wind Waker HD — puts its map and items on the
+# GamePad's own screen, which does not exist in Game Mode. With a Pro
+# Controller the same things are on the TV. Only the game can say which it
+# is, so it is set per game on the check screen with + and - together.
+CEMU_P1_PRO = os.path.join(STATE_DIR, "cemu-p1-pro.json")
+
+
+def cemu_p1_pro(rom):
+    return bool(rom) and bool(load_json(CEMU_P1_PRO, {}).get(os.path.basename(rom)))
+
+
+def set_cemu_p1_pro(rom, pro):
+    if not rom:
+        return
+    games = load_json(CEMU_P1_PRO, {})
+    if pro:
+        games[os.path.basename(rom)] = True
+    else:
+        games.pop(os.path.basename(rom), None)
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = CEMU_P1_PRO + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(games, fh, indent=2)
+    os.replace(tmp, CEMU_P1_PRO)
+
+
+def write_cemu_config(cfg_dir, pads, p1_pro=False):
+    """controller0.xml for P1, controller1-3 for the rest.
+
+    P1 is the GamePad unless this game has been switched to a Pro Controller
+    (see CEMU_P1_PRO); everyone else is always a Pro Controller.
+
+    Any other controllerN.xml that names one of the same pads is moved to the
+    backups: yesterday's P2 left in place would drive a second player with
+    today's P1.
+    """
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)
+    if not assigned:
+        return ["no controllers assigned"]
+    try:
+        os.makedirs(cfg_dir, exist_ok=True)
+    except OSError:
+        return [f"cannot create {cfg_dir}"]
+    rows = cemu_devices()
+    if rows is None:
+        print("cemu: could not enumerate through Cemu's SDL; using ours",
+              flush=True)
+    used, ours = set(), {}
+    for pad in assigned:
+        uuid = cemu_uuid(pad, rows, used)
+        gamepad = pad.slot == 1 and not p1_pro
+        ours[f"controller{pad.slot - 1}.xml"] = cemu_profile(pad, uuid, gamepad)
+        print(f"cemu: P{pad.slot} {pad.label} -> {uuid}", flush=True)
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    for n in range(CEMU_SLOTS):
+        name = f"controller{n}.xml"
+        path = os.path.join(cfg_dir, name)
+        if not os.path.isfile(path):
+            continue
+        backup = os.path.join(BACKUP_DIR, f"cemu-{stamp}-{name}")
+        if name in ours:
+            shutil.copy2(path, backup)
+            continue
+        try:
+            text = open(path, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        if any(f"<uuid>{u}</uuid>" in text for u in used):
+            shutil.move(path, backup)
+            print(f"cemu: moved stale {name} to backups", flush=True)
+
+    for name, text in ours.items():
+        path = os.path.join(cfg_dir, name)
+        tmp = path + ".preflight.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
     return []
 
 
@@ -2908,7 +3176,7 @@ def glyph_bar(ui, items, hidden=()):
 
 
 def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
-                  alert=None, layout="switch"):
+                  alert=None, layout="switch", wiiu=None):
     draw_frame(ui, "Controller check",
                "Controllers must be paired in your OS first \u2014 "
                "test your inputs before the game starts", emoji="\U0001F6A7",
@@ -2990,6 +3258,12 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
             (["ZL", "sep+", "ZR"], None, anyone, "swap ABXY"),
             (["\u2013"], "P1", p1c, "hold to quit"),
         ]
+        if wiiu:
+            # Says what P1 IS, not what pressing does: the thing to check
+            # before starting is which controller the game will be offered.
+            items.insert(3, (["+", "sep+", "\u2013"], "P1", p1c,
+                             "as Pro Controller" if wiiu == "pro"
+                             else "as GamePad"))
     glyph_bar(ui, items, hidden={1} if p1_claimed else ())
 
 
@@ -3122,6 +3396,8 @@ BACKEND_ENV = {
     # runtime's SDL 2.32 behind a sandbox — the Dolphin situation exactly, and
     # it cost an evening there.
     "eden": (VIRTUAL_PAD_HINT, EDEN_NO_HIDAPI),
+    # Cemu's flatpak links the freedesktop runtime's SDL 2.32: same story.
+    "cemu": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -3229,11 +3505,14 @@ def main():
             dolphin_config_target(dolphin_app_id, dolphin_exe)
     elif backend == "eden":
         cfg_path = eden_config_target(app_id, exe)
+    elif backend == "cemu":
+        cfg_path = cemu_config_target(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
         cfg_path = None
     needed = game_expectation(rom)
+    p1_pro = backend == "cemu" and cemu_p1_pro(rom)
 
     slots = new_slot_state()
     pads, unmapped = scan_pads(sdl)
@@ -3346,12 +3625,14 @@ def main():
                          for p in pads),
                    cycle.active,
                    tuple((k, tuple(sorted(v.items()))) for k, v in sorted(holds.items())),
-                   tuple(warnings), claimed_p1, alert)
+                   tuple(warnings), claimed_p1, alert, p1_pro)
             if sig != last_sig:
                 last_sig = sig
                 draw_pad_grid(ui, pads, cycle, warnings, needed, holds,
                               claimed_p1 is not None, alert,
-                              layout=layout_for(backend))
+                              layout=layout_for(backend),
+                              wiiu=("pro" if p1_pro else "gamepad")
+                              if backend == "cemu" else None)
                 ui.present()
 
         elif state == "error":
@@ -3411,6 +3692,23 @@ def main():
                     label_pads(pads)
                     continue
 
+                # + and - together: P1's Wii U controller type, on Cemu.
+                # Both holds are cancelled whoever does it — the two buttons
+                # are also start and quit, and pressing the pair must never
+                # set either off. The one still held after the other is let
+                # go does not re-arm: only a fresh press does.
+                if (backend == "cemu" and btn in (BTN_START, BTN_BACK)
+                        and BTN_START in pad.held and BTN_BACK in pad.held):
+                    holding.pop((pad.key, BTN_START), None)
+                    holding.pop((pad.key, BTN_BACK), None)
+                    if pad.slot == 1:
+                        p1_pro = not p1_pro
+                        set_cemu_p1_pro(rom, p1_pro)
+                        print(f"cemu: P1 is now a "
+                              f"{'Pro Controller' if p1_pro else 'GamePad'}",
+                              flush=True)
+                    continue
+
                 # Exit is available to every pad on purpose. Gating it to P1
                 # meant that if P1's controller slept, or someone else held
                 # it, nobody on the sofa could close the tool at all.
@@ -3449,6 +3747,8 @@ def main():
                 problems = write_eden_config(cfg_path, pads, sdl)
             elif backend in ("dolphin", "wheelwizard"):
                 problems = write_dolphin_config(cfg_path, pads)
+            elif backend == "cemu":
+                problems = write_cemu_config(cfg_path, pads, p1_pro)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:

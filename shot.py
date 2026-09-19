@@ -106,6 +106,8 @@ def main():
     ap.add_argument("--swap", type=int, action="append", default=[],
                     help="slot number to show with its A/B mirrored")
     ap.add_argument("--alert", help="text for the alert band")
+    ap.add_argument("--wiiu", choices=("gamepad", "pro"),
+                    help="draw the Cemu legend, with P1 as this controller")
     ap.add_argument("--layout", default="switch", choices=("switch", "gamecube"),
                     help="which pad the map describes; gamecube is Dolphin's")
     ap.add_argument("--press", action="append", default=[], metavar="SLOT:NAMES",
@@ -164,7 +166,8 @@ def main():
                 holds.setdefault(pad.key, {})[button_id(name)] = float(secs)
 
     pf.draw_pad_grid(ui, pads, pf.RumbleCycle(sdl), [], None, holds, False,
-                     args.alert, layout=args.layout)
+                     args.alert, layout=args.layout,
+                     wiiu=args.wiiu)
 
     buf = (ctypes.c_uint8 * (ui.w * ui.h * 4))()
     sdl.SDL_RenderReadPixels.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
