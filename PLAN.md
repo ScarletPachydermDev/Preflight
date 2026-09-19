@@ -382,6 +382,33 @@ Wizard then performs its own mod preparation and starts Dolphin with those
 bindings. The Steam virtual-pad SDL hint is also preserved through that child
 launch.
 
+**Cemu, as of 2026-09-19.** Built from Cemu 2.6's own source (`src/input/`)
+rather than a saved profile: `InputManager::load/save` for the file,
+`VPADController.h`/`ProController.h` for mapping ids, `Controller.h`'s
+`Buttons2` for button codes, `VPADController::set_default_mapping` for which
+SDL code each control takes. Notes worth keeping:
+
+- One `controllerProfiles/controllerN.xml` per player. The `<uuid>` is
+  `<n>_<SDL GUID>`, where n counts only pads sharing that GUID, and only
+  devices SDL calls game controllers — not a global index.
+- The GamePad and the Pro Controller number their controls differently (Pro
+  has Home between Minus and the d-pad), so each has its own table.
+- Its flatpak links the freedesktop runtime's SDL2. Pick the runtime Cemu's
+  own `metadata` names: 26.08 sat beside Cemu's 25.08 on the machine, and
+  "newest installed" chose the wrong one.
+- P1 is the GamePad by default because many games will not boot without one,
+  but Wind Waker HD puts its map and items on the GamePad's screen, which does
+  not exist in Game Mode. `+`and `-` together switch P1 to a Pro Controller,
+  stored per ROM in `cemu-p1-pro.json`. The gesture cancels both hold timers,
+  since the same two buttons start and quit.
+- A different controllerN.xml naming a pad we just assigned is moved to the
+  backups, or yesterday's P2 drives a second player with today's P1.
+- The map is the Switch one unchanged: the GamePad has the same control set.
+  The bay corner carries a Kenney Wii U GamePad/Pro badge, with the ABXY swap
+  badge under it.
+
+Untested so far: multiplayer on the TV, and the AppImage/portable paths.
+
 Guessing was the old way and it does not survive a second Switch emulator:
 `find_app_id()` grepped `flatpak list` for "ryu", and no ROM path can say
 whether a `.nsp` is meant for Ryujinx or Eden.

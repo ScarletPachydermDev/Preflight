@@ -3201,12 +3201,27 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
 
         ui.text(f"P{slot}", cx + 18, cy + 12, "head",
                 col if pad else blend(BG, DIM, 0.65), bold=True)
+        corner, swap_y = cx + cw - int(ch * 0.13), cy + int(ch * 0.13)
+        if wiiu:
+            # Which Wii U controller this bay becomes, from Kenney's Wii U
+            # set: P1 is whichever the game is set to, everyone else a Pro
+            # Controller. Drawn on empty bays too, dimmed like their map, so
+            # the answer is there before anyone joins.
+            kind = wiiu if slot == 1 else "pro"
+            bh = ch * 0.15
+            bw = bh * (96 / 60 if kind == "gamepad" else 96 / 64)
+            ui.image(art("wiiu/" + kind), cx + cw - int(ch * 0.06) - bw,
+                     cy + int(ch * 0.13) - bh / 2, bw, bh,
+                     color=col if pad else blend(BG, DIM, 0.65))
+            # The swap badge stacks under this one rather than beside it, so
+            # the corner reads as one column of facts about the pad.
+            corner = cx + cw - int(ch * 0.06) - bw / 2
+            swap_y = cy + int(ch * 0.13) + bh / 2 + ch * 0.04 + ch * 0.075
         if pad and pad.swap_faces:
             # Badged in the corner rather than on the pad itself — there is no
             # room among the buttons, and a non-default mapping deserves to be
             # visible from across the room.
-            swap_icon(ui, cx + cw - int(ch * 0.13), cy + int(ch * 0.13),
-                      ch * 0.15, col)
+            swap_icon(ui, corner, swap_y, ch * 0.15, col)
 
         # High in the bay, with the label well under it: at the old spacing
         # the lowest buttons very nearly touched the controller's name.
@@ -3262,8 +3277,8 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
             # Says what P1 IS, not what pressing does: the thing to check
             # before starting is which controller the game will be offered.
             items.insert(3, (["+", "sep+", "\u2013"], "P1", p1c,
-                             "as Pro Controller" if wiiu == "pro"
-                             else "as GamePad"))
+                             "is a Wii U Pro Controller" if wiiu == "pro"
+                             else "is a Wii U GamePad"))
     glyph_bar(ui, items, hidden={1} if p1_claimed else ())
 
 

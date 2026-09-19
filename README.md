@@ -30,6 +30,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | **Dolphin** | flatpak | GameCube controller only |
 | **Wheel Wizard** | Flatpak, native Linux build | writes Dolphin's GameCube pads before Wheel Wizard launches it |
 | **Eden** | flatpak, AppImage | all four players' bindings, as Pro Controllers — needs Steam Input **on** |
+| **Cemu** | flatpak | all four players: P1 a Wii U GamePad or Pro Controller (**+** and **−** on the check screen, remembered per game), the rest Pro Controllers |
 
 ## Requirements
 
