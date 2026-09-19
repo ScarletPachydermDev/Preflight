@@ -1193,6 +1193,10 @@ def find_config(app_id=None, exe=None):
     return None
 
 
+DSU_HOST = "127.0.0.1"
+DSU_PORT = 26760
+
+
 # A complete, standard SDL gamepad binding — used when the user's config has
 # no gamepad entry to clone from, i.e. a fresh Ryujinx install. Field names and
 # value spellings are taken verbatim from a real Ryujinx-written entry rather
@@ -1209,8 +1213,16 @@ DEFAULT_ENTRY = {
     "range_left": 1,
     "range_right": 1,
     "trigger_threshold": 0.5,
+    # CemuHook with a real address, not the empty one a fresh entry carries:
+    # the backend is the only way to real gyro under Steam, because Ryujinx's
+    # own GamepadDriver backend reads the Steam virtual gamepad, which has no
+    # IMU. 127.0.0.1:26760 is the standard DSU address and what
+    # SteamDeckGyroDSU publishes on; proven on the Deck 2026-09-19 with
+    # Breath of the Wild's shrines and bow aiming, SteamOS gyro off. SelfSteam
+    # writes the same two values when it creates a Ryubing shortcut, so the
+    # two agree rather than overwriting each other every launch.
     "motion": {"slot": 0, "alt_slot": 0, "mirror_input": False,
-               "dsu_server_host": None, "dsu_server_port": 0,
+               "dsu_server_host": DSU_HOST, "dsu_server_port": DSU_PORT,
                "motion_backend": "CemuHook", "sensitivity": 100,
                "gyro_deadzone": 1, "enable_motion": True},
     "rumble": {"strong_rumble": 1, "weak_rumble": 1, "enable_rumble": True},
@@ -1309,6 +1321,24 @@ def repair_entry(entry):
     return repaired
 
 
+def repair_motion(entry):
+    """Give a CemuHook profile an address if it has none.
+
+    Cloning is how everything but the face mapping is inherited, so a profile
+    cloned from an entry with an empty host stays deaf to the DSU server for
+    ever. Only the empty case is touched: a host the user has actually set —
+    a phone, another machine — is theirs.
+    """
+    motion = entry.get("motion")
+    if not isinstance(motion, dict) or motion.get("motion_backend") != "CemuHook":
+        return False
+    if motion.get("dsu_server_host") or motion.get("dsu_server_port"):
+        return False
+    motion["dsu_server_host"] = DSU_HOST
+    motion["dsu_server_port"] = DSU_PORT
+    return True
+
+
 def config_binding_gaps(cfg_path):
     """Gaps in the config we would be cloning from, for warning up front."""
     data = load_json(cfg_path, None) if cfg_path else None
@@ -1374,6 +1404,8 @@ def build_entries(existing, pads, rows=None):
         # The face mapping is authored; the rest is inherited. Patch any hole
         # in what was inherited rather than shipping a half-dead controller.
         repaired = repair_entry(tpl)
+        if repair_motion(tpl):
+            repaired.append(f"motion.dsu_server ({DSU_HOST}:{DSU_PORT})")
         if repaired:
             print(f"repaired for {p.label}: {', '.join(repaired)}", flush=True)
         out.append(tpl)

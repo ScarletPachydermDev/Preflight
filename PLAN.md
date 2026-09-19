@@ -382,6 +382,21 @@ Wizard then performs its own mod preparation and starts Dolphin with those
 bindings. The Steam virtual-pad SDL hint is also preserved through that child
 launch.
 
+**Gyro through DSU, as of 2026-09-19.** `DEFAULT_ENTRY`'s motion block asked
+for the CemuHook backend with no address at all (`dsu_server_host: None`,
+`dsu_server_port: 0`), so a profile Preflight wrote pointed CemuHook at
+nothing and no gyro ever arrived. It now writes `127.0.0.1:26760`, the
+standard DSU address, which is what SteamDeckGyroDSU publishes the Deck's own
+IMU on — proven on the Deck with Breath of the Wild's shrines and bow aiming,
+SteamOS gyro off. Ryujinx's own GamepadDriver backend cannot do this under
+Steam: it reads the Steam virtual gamepad, which has no IMU.
+
+`repair_motion()` does the same for a CLONED entry, because everything but
+the face mapping is inherited and an empty host would otherwise survive for
+ever. Only the empty case is filled; a host the user set is left alone.
+SelfSteam writes the same two values when it creates a Ryubing shortcut, so
+the two now agree instead of overwriting each other at every launch.
+
 **Cemu, as of 2026-09-19.** Built from Cemu 2.6's own source (`src/input/`)
 rather than a saved profile: `InputManager::load/save` for the file,
 `VPADController.h`/`ProController.h` for mapping ids, `Controller.h`'s
