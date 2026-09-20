@@ -1836,7 +1836,11 @@ def _axis(sdl3_axis, sign):
 GOPHER_IDENTITY = {
     "dpad_right": _button(14), "dpad_left": _button(13),
     "dpad_down": _button(12), "dpad_up": _button(11),
-    "start": _button(6), "z": _axis(4, 1),
+    # Z on the RIGHT trigger. gopher64's default has it on the left, but Z is
+    # the N64's fire button and the left trigger is worth more free: Steam
+    # Input can make a held trigger shift ABXY onto the C buttons, and
+    # gopher64 itself has no notion of a held modifier.
+    "start": _button(6), "z": _axis(5, 1),
     # B on the pad's B, not on West where gopher64's own default puts it.
     # Their choice follows the N64's shape — B sits left of A there, and West
     # is the left face button on a modern pad — but it means the button
@@ -3229,7 +3233,7 @@ def _n64_controls(g, held, axes, swap, holds, wys):
     # digital on this pad even though gopher64 reads it off a trigger axis.
     draw_top_row(g, lay, (
         Control(-(lay.TRIGGER + N64_Z_OUT), "z",
-                S(0.31 * N64_TOP * N64_Z), axis=4),
+                S(0.31 * N64_TOP * N64_Z), axis=5),
         Control(-lay.SHOULDER, "l", S(0.31 * N64_TOP), (BTN_LSHOULDER,)),
         Control(lay.SHOULDER, "r", S(0.31 * N64_TOP), (BTN_RSHOULDER,)),
         # Start sits lower than the rest of the row: the hold ring is drawn
