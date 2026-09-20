@@ -397,6 +397,39 @@ ever. Only the empty case is filled; a host the user set is left alone.
 SelfSteam writes the same two values when it creates a Ryubing shortcut, so
 the two now agree instead of overwriting each other at every launch.
 
+**gopher64, as of 2026-09-20.** Built from its own source (`src/ui/`) and a
+config it wrote: `config.json` keeps named input profiles, each an array of 19
+slots in `input_profile.rs`'s order, every slot a [keyboard, controller] pair.
+Preflight writes one profile per player, binds it to that port and **enables
+the port** — ports 2-4 ship disabled, so multiplayer could not work without
+that. Only the controller half is written; the keyboard half is cloned from
+gopher64's own default profile.
+
+- `controller_assignment` is a **kernel device path**, and only gopher64's
+  statically-linked SDL3 knows which path it will open for a pad — there is no
+  library to borrow as there is for Dolphin and Cemu. So the assignment is
+  made by gopher64 itself: `--list-controllers` to see them (which also
+  creates config.json on a fresh install), `--assign-controller N --port P` to
+  record one. It round-trips the whole file, keeping what preflight wrote,
+  and preflight re-reads it afterwards to check.
+- It prints SDL3's joystick name, which for a Steam virtual pad is the KERNEL
+  name — "Microsoft X-Box 360 pad 0" where this tool says "Steam Virtual
+  Gamepad". Measured on the machine; every name a pad answers to is tried.
+- Its own default puts N64 **B on West** (X on an Xbox-labelled pad), which
+  follows the N64's shape but breaks the one rule this tool has. B is written
+  on B. Confirmed wrong-way-round on the machine first.
+- The map is the N64 one: the C buttons are four buttons, not a stick, even
+  though gopher64 binds them to the right stick — that is how they are played,
+  not what the pad has. Art is the user's own icons (`selfsteam assets/n64
+  kenney'd icons`), cut apart in stage-art.py; the layout comes from
+  n64-3.psd, measured off the COMPOSITE's ink rather than its layer boxes,
+  which carry margin and halved the C buttons. Sizes measured off art are ink,
+  and preflight draws ink at 0.78 of its box (`N64_BOX`) — forgetting that
+  drew every button a fifth small and opened gaps in the cross.
+- This map alone gets a taller strip (`PAD_ASPECT_N64`) and a bigger top row
+  (`N64_TOP`, measured against the GameCube's 69 px shoulders), because the
+  group is wide and the pad has one stick to make room with.
+
 **Cemu, as of 2026-09-19.** Built from Cemu 2.6's own source (`src/input/`)
 rather than a saved profile: `InputManager::load/save` for the file,
 `VPADController.h`/`ProController.h` for mapping ids, `Controller.h`'s

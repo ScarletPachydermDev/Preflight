@@ -1086,6 +1086,7 @@ BACKENDS = {
     "dolphin": ("dolphin",),
     "eden": ("eden",),
     "cemu": ("cemu",),
+    "gopher64": ("gopher",),
 }
 
 
@@ -1802,6 +1803,229 @@ def write_eden_config(cfg_path, pads, sdl):
             BACKUP_DIR, f"qt-config.{time.strftime('%Y%m%d-%H%M%S')}.ini"))
     if not set_ini_keys(cfg_path, "Controls", values):
         return ["could not write the [Controls] section of qt-config.ini"]
+    return []
+
+
+# ------------------------------------------------------------------ gopher64
+
+GOPHER_APP_ID = "io.github.gopher64.gopher64"
+
+# gopher64 keeps one profile per name in config.json and an array of 19 slots
+# in each, in this order — src/ui/input_profile.rs's own constants. Each slot
+# holds two bindings, [keyboard, controller]; only the second is ours.
+GOPHER_SLOTS = ("dpad_right", "dpad_left", "dpad_down", "dpad_up", "start",
+                "z", "b", "a", "c_right", "c_left", "c_down", "c_up",
+                "r", "l", "stick_right", "stick_left", "stick_down",
+                "stick_up", "hotkey")
+
+
+def _button(sdl3_id):
+    return {"ControllerButton": {"id": sdl3_id}}
+
+
+def _axis(sdl3_axis, sign):
+    return {"ControllerAxis": {"id": sdl3_axis, "axis": sign,
+                               "initial_state": 0}}
+
+
+# gopher64's own defaults, read back out of a config.json it wrote: SDL3
+# numbering, so 0-3 are the face buttons, 9/10 the shoulders, 11-14 the d-pad,
+# axes 0/1 the left stick, 2/3 the right, 4 the left trigger. The C buttons
+# are the right stick, which is how an N64 pad's yellow cluster is played on
+# anything modern, and Z is the left trigger.
+GOPHER_IDENTITY = {
+    "dpad_right": _button(14), "dpad_left": _button(13),
+    "dpad_down": _button(12), "dpad_up": _button(11),
+    "start": _button(6), "z": _axis(4, 1),
+    # B on the pad's B, not on West where gopher64's own default puts it.
+    # Their choice follows the N64's shape — B sits left of A there, and West
+    # is the left face button on a modern pad — but it means the button
+    # marked B does nothing and X plays B, which is the one thing this tool
+    # exists to prevent. Confirmed on the machine: pressing X gave B.
+    "b": _button(1), "a": _button(0),
+    "c_right": _axis(2, 1), "c_left": _axis(2, -1),
+    "c_down": _axis(3, 1), "c_up": _axis(3, -1),
+    "r": _button(10), "l": _button(9),
+    "stick_right": _axis(0, 1), "stick_left": _axis(0, -1),
+    "stick_down": _axis(1, 1), "stick_up": _axis(1, -1),
+    "hotkey": _button(4),
+}
+# An N64 pad has two face buttons, so the swap is A and B trading places and
+# nothing else. Same gesture, same meaning as the other maps.
+GOPHER_MIRRORED = dict(GOPHER_IDENTITY, a=_button(1), b=_button(0))
+
+
+def gopher_profile_name(slot):
+    return f"preflight-p{slot}"
+
+
+def gopher_run(args, app_id=None, exe=None, timeout=60):
+    """One gopher64 CLI call, with Steam's virtual pads made visible.
+
+    Its SDL3 is linked statically, so there is no library to borrow the way
+    Dolphin's and Cemu's SDL can be borrowed: gopher64's own binary is the
+    only thing that can enumerate the way gopher64 does, and --list-controllers
+    and --assign-controller are exactly that. The hint has to cross a flatpak
+    sandbox, hence --env rather than the environment.
+    """
+    key, _, value = VIRTUAL_PAD_HINT.partition("=")
+    if exe:
+        cmd = [exe] + list(args)
+        env = dict(os.environ, **{key: value})
+    else:
+        cmd = ["flatpak", "run", f"--env={VIRTUAL_PAD_HINT}",
+               app_id or GOPHER_APP_ID] + list(args)
+        env = dict(os.environ)
+    try:
+        return subprocess.run(cmd, env=env, capture_output=True, text=True,
+                              timeout=timeout)
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def gopher_controllers(app_id=None, exe=None):
+    """[name] in gopher64's own order, as --list-controllers prints it.
+
+    Also the call that creates config.json on a fresh install: gopher64 writes
+    the file whenever it has read it, so asking it anything at all leaves a
+    config to edit.
+    """
+    out = gopher_run(["--list-controllers"], app_id, exe)
+    if out is None or out.returncode != 0:
+        return None
+    names = []
+    for line in out.stdout.splitlines():
+        head, sep, name = line.partition(": ")
+        if sep and head.startswith("Controller "):
+            names.append(name.strip())
+    return names or None
+
+
+def gopher_index_for(pad, names, used):
+    """Which --list-controllers entry is this pad.
+
+    gopher64 prints SDL3's joystick name, and for a Steam virtual pad that is
+    the KERNEL's name, not SDL2's: "Microsoft X-Box 360 pad 0" where this tool
+    says "Steam Virtual Gamepad" — measured on the machine, and the same trap
+    Dolphin's evdev names were. So every name this pad answers to is tried,
+    and identical models are matched in order.
+    """
+    wanted = [n for n in (pad.name, pad.gc_name, kernel_name(pad)) if n]
+    for want in wanted:
+        for i, name in enumerate(names or ()):
+            if i not in used and name == want:
+                used.add(i)
+                return i
+    return None
+
+
+def find_gopher_config(app_id=None, exe=None):
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        portable = os.path.join(base, "portable_data", "config.json")
+        if os.path.isfile(portable):
+            return portable
+        return os.path.expanduser("~/.config/gopher64/config.json")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or GOPHER_APP_ID}/config/gopher64/config.json")
+
+
+def gopher_entry(pad, template):
+    """One input profile for this pad: gopher64's own keyboard half kept,
+    the controller half written from scratch."""
+    table = GOPHER_MIRRORED if pad.swap_faces else GOPHER_IDENTITY
+    rows = []
+    for i, role in enumerate(GOPHER_SLOTS):
+        pair = None
+        if template and i < len(template):
+            pair = template[i]
+        keyboard = pair[0] if isinstance(pair, list) and pair else None
+        rows.append([keyboard, copy.deepcopy(table[role])])
+    return {"inputs": rows, "dinput": False, "deadzone": 5}
+
+
+def write_gopher_config(cfg_path, pads, app_id=None, exe=None):
+    """Write a profile per assigned pad, bind it to that pad's port, enable
+    the port, and let gopher64 itself record which device it is.
+
+    The device is recorded by gopher64 rather than by us on purpose: its
+    controller_assignment is a kernel device path, and only gopher64's own
+    statically-linked SDL3 can say which path it will open for a given pad.
+    Its --assign-controller does that and rewrites the file, keeping
+    everything written here.
+    """
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)
+    if not assigned:
+        return ["no controllers assigned"]
+
+    names = gopher_controllers(app_id, exe)
+    if names is None:
+        return ["gopher64 would not list its controllers — cannot write."]
+    print(f"gopher64 sees: {', '.join(names) or 'nothing'}", flush=True)
+
+    data = load_json(cfg_path, None)
+    if data is None:
+        return ["cannot read gopher64's config.json"]
+    inp = data.setdefault("input", {})
+    profiles = inp.setdefault("input_profiles", {})
+    template = (profiles.get("default") or {}).get("inputs")
+
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"gopher64.{stamp}.json"))
+
+    binding = inp.get("input_profile_binding") or ["default"] * 4
+    enabled = inp.get("controller_enabled") or [True, False, False, False]
+    binding = (list(binding) + ["default"] * 4)[:4]
+    enabled = (list(enabled) + [False] * 4)[:4]
+
+    used, ports, problems = set(), [], []
+    for pad in assigned:
+        name = gopher_profile_name(pad.slot)
+        profiles[name] = gopher_entry(pad, template)
+        binding[pad.slot - 1] = name
+        # Only ports we are filling: a port left enabled with nothing in it
+        # is a controller the game waits for and nobody holds.
+        enabled[pad.slot - 1] = True
+        index = gopher_index_for(pad, names, used)
+        if index is None:
+            problems.append(f"{pad.label}: gopher64 does not see this pad "
+                            f"(it lists {len(names)})")
+            continue
+        ports.append((pad, index))
+    for slot in range(1, 5):
+        if not any(p.slot == slot for p in assigned):
+            enabled[slot - 1] = False
+
+    if problems:
+        return problems
+    inp["input_profile_binding"] = binding
+    inp["controller_enabled"] = enabled
+    tmp = cfg_path + ".preflight.tmp"
+    with open(tmp, "w") as fh:
+        json.dump(data, fh, indent=2)
+    os.replace(tmp, cfg_path)
+
+    for pad, index in ports:
+        out = gopher_run(["--assign-controller", str(index + 1),
+                          "--port", str(pad.slot)], app_id, exe)
+        if out is None or out.returncode != 0:
+            return [f"gopher64 refused to take P{pad.slot}'s controller "
+                    f"assignment ({names[index]})."]
+        print(f"gopher64: P{pad.slot} {pad.label} -> controller {index + 1} "
+              f"({names[index]})", flush=True)
+
+    # gopher64 rewrote the file to record the devices; make sure what it kept
+    # is still what we asked for, rather than trusting two writers blindly.
+    fresh = load_json(cfg_path, None) or {}
+    got = (fresh.get("input") or {})
+    if got.get("input_profile_binding") != binding:
+        return ["gopher64 did not keep the profiles preflight wrote."]
+    missing = [p.slot for p, _ in ports
+               if not (got.get("controller_assignment") or [None] * 4)[p.slot - 1]]
+    if missing:
+        return [f"gopher64 recorded no device for port(s) "
+                f"{', '.join(str(s) for s in missing)}."]
     return []
 
 
@@ -2564,6 +2788,7 @@ def hold_ring(ui, cx, cy, radius, fraction, color, track):
 # unused — and the GameCube cluster, which is the widest thing drawn, had
 # nowhere to grow into.
 PAD_ASPECT = 3.2
+PAD_ASPECT_N64 = 2.3
 
 
 class Bay:
@@ -2653,12 +2878,19 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
     the one in the player's hands: a GameCube game gets a GameCube map, so
     what is on screen is what the game will answer to.
     """
-    dw, dh = bw, bw / PAD_ASPECT
+    # The N64 map is drawn on a taller strip. Its cluster reaches two and a
+    # half buttons above A where the GameCube's reaches one, so on the wide
+    # strip every glyph had to shrink to fit that climb; height is what the
+    # layout actually needs, and the lane the second stick would have used
+    # is free on this pad anyway.
+    aspect = PAD_ASPECT_N64 if layout == "n64" else PAD_ASPECT
+    dw, dh = bw, bw / aspect
     if dh > bh:
-        dw, dh = bh * PAD_ASPECT, bh
+        dw, dh = bh * aspect, bh
     g = Bay(ui, bx + (bw - dw) / 2, by + (bh - dh) / 2, dw, dh, col, bg, dim,
-            art="gc/" if layout == "gamecube" else "")
-    controls = _gamecube_controls if layout == "gamecube" else _switch_controls
+            art={"gamecube": "gc/", "n64": "n64/"}.get(layout, ""))
+    controls = {"gamecube": _gamecube_controls,
+                "n64": _n64_controls}.get(layout, _switch_controls)
     controls(g, held, axes, swap, holds or {}, wys)
 
 
@@ -2711,9 +2943,13 @@ class Layout:
         # off-centre, keeping its own spacing.
         self.air = air
         self.mid = (self.centres[1] + self.centres[2]) / 2
+        # Where a cluster that spans the last two lanes sits: the N64 map's
+        # C buttons need the room, and nothing else is in that lane there.
+        self.mid_faces = (self.centres[2] + self.centres[3]) / 2
         reach = min(self.mid - g.ox, g.ox + g.dw - self.mid) - S(0.31) / 2
         self.fit = min(1.0, reach / S(1.02))
         self.dh = g.dh
+        self.ox, self.dw = g.ox, g.dw
 
     # Across the top row, by role rather than by name: the outer pair are the
     # analog triggers on either pad, then the shoulders, then whatever sits
@@ -2734,25 +2970,25 @@ class Layout:
 # trigger's shape. The GameCube is the only Nintendo console that ever had
 # analog shoulders, so it is the only map that draws them that way.
 Control = collections.namedtuple(
-    "Control", "offset name box buttons axis analog",
-    defaults=((), None, False))
+    "Control", "offset name box buttons axis analog dy",
+    defaults=((), None, False, 0.0))
 
 
 def draw_top_row(g, lay, items, holds, held, axes):
     """The top strip, shared by both maps."""
     for c in items:
-        cx = lay.across(c.offset)
+        cx, cy = lay.across(c.offset), lay.top_y + c.dy
         if c.analog:
-            trigger(g, c.name, cx, lay.top_y, c.box, c.box,
+            trigger(g, c.name, cx, cy, c.box, c.box,
                     axes.get(c.axis, 0))
             continue
         down = any(b in held for b in c.buttons)
         if c.axis is not None:
             down = down or axes.get(c.axis, 0) > 8000
-        g.glyph(c.name, cx, lay.top_y, c.box, active=down)
+        g.glyph(c.name, cx, cy, c.box, active=down)
         for btn in c.buttons:
             if holds.get(btn, 0.0) > 0:
-                hold_ring(g.ui, cx, lay.top_y, c.box * 0.643, holds[btn],
+                hold_ring(g.ui, cx, cy, c.box * 0.643, holds[btn],
                           g.lit, g.track)
 
 
@@ -2822,7 +3058,8 @@ GC_FACES = {
 # colour. The C stick is the exception: it is yellow on the pad and yellow in
 # the pack, and tinting that by a player's colour turns it to mud. It keeps
 # its own colour and is dimmed rather than recoloured.
-SELF_COLOURED = {"gc/stick_r"}
+SELF_COLOURED = {"gc/stick_r"} | {
+    f"n64/{n}" for n in ("c", "c_up", "c_down", "c_left", "c_right")}
 
 # How much of its canvas a glyph's ink takes up, for the few places that
 # measure against ink rather than the box it is drawn in. Keyed the way the
@@ -2830,7 +3067,7 @@ SELF_COLOURED = {"gc/stick_r"}
 INK = {"gc/l": (0.750, 0.688), "gc/r": (0.750, 0.688)}
 
 
-def gc_cluster(lay):
+def gc_cluster(lay, faces=None):
     """(centre, scale) for the face cluster, grown into the room it has.
 
     A GameCube's four buttons are spread wider and taller than the Switch
@@ -2841,7 +3078,7 @@ def gc_cluster(lay):
     chosen, because the answer changes with every other number here.
     """
     xs, ys = [], []
-    for (dx, dy), (sw, sh) in GC_FACES.values():
+    for (dx, dy), (sw, sh) in (faces or GC_FACES).values():
         xs += [dx - sw / 2, dx + sw / 2]
         ys += [dy - sh / 2, dy + sh / 2]
     lo_x, hi_x, lo_y, hi_y = min(xs), max(xs), min(ys), max(ys)
@@ -2911,6 +3148,165 @@ def _gamecube_controls(g, held, axes, swap, holds, wys):
                lay.row_y + (dy - anchor_y) * lay.fside * scale,
                lay.fside * sw * scale, lay.fside * sh * scale,
                pressed=letter in live, wys=wys)
+
+
+# An N64 pad's face controls: A, B beside and above it, and the four C
+# buttons in their own cross above both. Read straight off n64.psd — each
+# layer's box, divided by A's, with A at the origin. Same units as GC_FACES.
+#
+# The C buttons are four buttons, not a stick. gopher64 binds them to the
+# right stick, which is how they are played, but the map draws what the N64
+# has, and a player looking for C-up should find a button marked C-up.
+# Ink measures 0.78 of the box a glyph is drawn in (tools/stage-art.py's
+# N64_INK), so a size measured off the art has to be divided by that to give
+# the box that draws it. Skipping this drew every button a fifth smaller than
+# its own spacing assumed, which is what opened the gaps in the C cross.
+N64_BOX = 1 / 0.78
+
+N64_FACES = {
+    # Measured off n64-3.psd — the ink in its composite, not its layer boxes,
+    # which carry margin and made the C buttons come out half size. Units of
+    # a face button (57 px there), from B.
+    "b":       ((+0.000, +0.000), (1.000, 1.000)),
+    "a":       ((+0.877, +0.895), (1.000, 1.000)),
+    # The cross is pulled 0.30 nearer than the draft has it, by eye: the
+    # draft's own gap was drawn against the pack's arrows, which are smaller
+    # than these icons, so at the real button size it read as a hole.
+    "c_up":    ((+2.849, -0.237), (0.724, 0.724)),
+    "c_left":  ((+2.095, +0.465), (0.724, 0.724)),
+    "c_right": ((+3.595, +0.474), (0.724, 0.724)),
+    "c_down":  ((+2.849, +1.167), (0.724, 0.724)),
+    # The C in the middle of them is a label, not a button: never lit, and
+    # not counted when the cluster is fitted, since it sits inside it. The
+    # draft leaves it out — it was drawn with the pack's arrows — but the
+    # icons have one, and without it the cross reads as a second d-pad.
+    "c":       ((+2.845, +0.467), (0.370, 0.370)),
+}
+N64_FACES = {name: (offset, (sw * N64_BOX, sh * N64_BOX))
+             for name, (offset, (sw, sh)) in N64_FACES.items()}
+
+# A nudge right, by eye: the group is measured from B, and leaving it centred
+# in the space it is given put more air to its right than its left.
+N64_SHIFT = 0.85
+
+# The N64 map is drawn on a taller strip, so a box given as a fraction of
+# that strip's height comes out bigger in pixels than the same box on the
+# other maps — L and R measured 85 px against the GameCube's 69. The top row
+# is meant to be the one part every map shares, so this holds it to the same
+# drawn size. Measured, not guessed: 69/85.
+N64_TOP = 1.38
+
+# Z is its own size and place. The icon is an upright rounded rectangle where
+# every other glyph in the row is a wide pill, so at the row's size it read as
+# the biggest thing up there; and with the row this large it sat too close to
+# L. Smaller, and a little further out.
+N64_Z = 0.80
+N64_Z_OUT = 0.12
+N64_START_DOWN = 0.12
+
+# Which way each C button reads on the stick gopher64 binds it to.
+N64_C_AXES = {"c_up": (3, -1), "c_down": (3, 1),
+              "c_left": (2, -1), "c_right": (2, 1)}
+N64_C_DEADZONE = 12000
+
+
+def _n64_controls(g, held, axes, swap, holds, wys):
+    """What an N64 pad has, in the places the other maps put their own.
+
+    Three things are the pad's own. There is one analog stick, so the second
+    stick lane carries the C buttons — which is not a liberty: gopher64 binds
+    C to the right stick, so that IS what the game answers to, and the C
+    glyph is yellow exactly as the buttons are. Z is a trigger and sits where
+    the other maps' left trigger is. And there are two face buttons, so the
+    swap gesture trades A and B and nothing else.
+    """
+    S = g.S
+    on = held.__contains__
+    lay = Layout(g)
+
+    # Z on the left where L and ZL live on the other maps, L and R in the
+    # shoulder places, Start in the middle, as on the GameCube map. Z is
+    # digital on this pad even though gopher64 reads it off a trigger axis.
+    draw_top_row(g, lay, (
+        Control(-(lay.TRIGGER + N64_Z_OUT), "z",
+                S(0.31 * N64_TOP * N64_Z), axis=4),
+        Control(-lay.SHOULDER, "l", S(0.31 * N64_TOP), (BTN_LSHOULDER,)),
+        Control(lay.SHOULDER, "r", S(0.31 * N64_TOP), (BTN_RSHOULDER,)),
+        # Start sits lower than the rest of the row: the hold ring is drawn
+        # round it at two thirds of its box again, and at this row size that
+        # ring reached past the top of the bay and crossed the card's frame.
+        Control(0.0, "start_plain", S(0.21 * N64_TOP), (BTN_START,),
+                dy=N64_START_DOWN * S(1.0)),
+    ), holds, held, axes)
+
+    # Start alone starts, Z with it quits — the GameCube arrangement, for the
+    # same reason: no second button on the pad to give quitting.
+    if holds.get(BTN_BACK, 0.0) > 0:
+        hold_ring(g.ui, lay.across(0.0), lay.top_y + N64_START_DOWN * S(1.0),
+                  S(0.21 * N64_TOP) * 0.643, holds[BTN_BACK], FG, g.track)
+
+    dpad_arms(g, lay.centres[0], lay.row_y, lay.dside, held)
+
+    # One stick, in the first stick lane. The second lane is where the C
+    # cluster reaches into: this pad has nothing else to put there, and the
+    # cluster is wide enough to want it.
+    stick(g, lay.centres[1], lay.row_y, lay.sside, lay.stravel,
+          axes, 0, 1, "stick_l", on(BTN_LSTICK))
+
+    (anchor_x, anchor_y), scale, group_x = n64_cluster(lay)
+    live = face_live(held, swap)
+    for name, (letter, pressed) in N64_CLUSTER.items():
+        (dx, dy), (sw, sh) = N64_FACES[name]
+        cx = group_x + (dx - anchor_x) * lay.fside * scale
+        cy = lay.row_y + (dy - anchor_y) * lay.fside * scale
+        w, h = lay.fside * sw * scale, lay.fside * sh * scale
+        if letter is not None:            # A and B: lit by label, ringed
+            g.face(name, cx, cy, w, h, pressed=letter in live, wys=wys)
+            continue
+        down = False
+        if name in N64_C_AXES:
+            axis, sign = N64_C_AXES[name]
+            down = axes.get(axis, 0) * sign > N64_C_DEADZONE
+        g.glyph(name, cx, cy, w, h, active=down)
+
+
+# What each glyph in the cluster is: a face button lit by its label, or a
+# plain glyph lit by an axis (or, for the C in the middle, never).
+N64_CLUSTER = {"c_up": (None, True), "c_left": (None, True),
+               "c_right": (None, True), "c_down": (None, True),
+               "c": (None, False),
+               "b": ("B", True), "a": ("A", True)}
+
+
+def n64_cluster(lay):
+    """(centre, scale, x) for the N64 group: A, B and the C cross together.
+
+    Wide rather than tall — four C buttons beside two face buttons is over
+    four buttons across — so what it needs is width, and this pad leaves
+    plenty: there is one stick, so everything from the stick's edge to the
+    end of the strip is its own. Height still limits it when the bay is
+    short, and the C label is left out of the measuring since it sits inside
+    the cross.
+    """
+    xs, ys = [], []
+    for name, ((dx, dy), (sw, sh)) in N64_FACES.items():
+        if name == "c":
+            continue
+        xs += [dx - sw / 2, dx + sw / 2]
+        ys += [dy - sh / 2, dy + sh / 2]
+    lo_x, hi_x, lo_y, hi_y = min(xs), max(xs), min(ys), max(ys)
+    centre = ((lo_x + hi_x) / 2, (lo_y + hi_y) / 2)
+
+    gap = lay.S(0.04)
+    left = lay.centres[1] + lay.sside / 2 + lay.stravel + lay.air / 2
+    right = lay.ox + lay.dw
+    across = (hi_x - lo_x) * lay.fside
+    tall = (hi_y - lo_y) * lay.fside
+    room_up = lay.row_y - (lay.top_y + lay.top_box / 2) - gap
+    room_down = lay.floor - lay.row_y
+    scale = min((right - left) / across,
+                2 * min(room_up, room_down) / tall)
+    return centre, scale, (left + right) / 2 + N64_SHIFT * lay.fside * scale
 
 
 def dpad_arms(g, cx, cy, side, held):
@@ -3052,6 +3448,9 @@ GLYPH_ART = {
     # Start without its caption: there is no room for lettering this small,
     # and the label beside it already says what holding it does.
     "gc:start": ("gc/start_plain", 1.0),
+    # The N64 set. Start keeps its caption on this map, so the legend shows
+    # the same button the map does.
+    "n64:z": ("n64/z", 1.0), "n64:start": ("n64/start_plain", 1.0),
 }
 
 
@@ -3258,10 +3657,15 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
         # High in the bay, with the label well under it: at the old spacing
         # the lowest buttons very nearly touched the controller's name.
         top, under = 0.15, 0.13
+        if layout == "n64":
+            # This map is a tall one — the C cross climbs two and a half
+            # buttons above A — so it is given the slack the others leave
+            # between the strip and the controller's name.
+            top, under = 0.10, 0.11
         # 0.70 of the bay, not 0.62: raising the map left slack between it
         # and the label, and a taller strip makes every glyph bigger on a
         # screen being read from a sofa.
-        pw, ph = int(cw * 0.92), int(ch * 0.70)
+        pw, ph = int(cw * 0.92), int(ch * (0.82 if layout == "n64" else 0.70))
         card_bg = blend(BG, col, 0.30 if buzzing else 0.10)
         draw_gamepad(ui, cx + (cw - pw) / 2, cy + ch * top, pw, ph, col,
                      pad.held if pad else set(), pad.axes if pad else {},
@@ -3289,14 +3693,22 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
     # the exception: the stick presses are preflight's own doing and belong to
     # no emulated pad, so that entry stays as it is in both.
     claim = (["L3", "sep+", "R3"], None, None, "claim P1")
-    if layout == "gamecube":
+    if layout in ("gamecube", "n64"):
         # This pad has no select button, so quit borrows Start and Z tells
         # the two gestures apart. Either shoulder is Z, so either hand works.
+        start_art = "n64:start" if layout == "n64" else "gc:start"
+        z_art = "n64:z" if layout == "n64" else "gc:z"
         items = [
-            (["gc:start"], "P1", p1c, "hold to start"),
+            ([start_art], "P1", p1c, "hold to start"),
             claim,
-            (["gc:l", "sep+", "gc:r"], None, anyone, "swap ABXY"),
-            (["gc:z", "sep+", "gc:start"], "P1", p1c, "hold to quit"),
+            # The swap is both analog triggers. On the GameCube map those
+            # ARE L and R, so their own glyphs say it; an N64 pad has no
+            # right trigger to name, so the player's real pad is named
+            # instead, as "claim P1" already does.
+            (["ZL", "sep+", "ZR"] if layout == "n64"
+             else ["gc:l", "sep+", "gc:r"], None, anyone,
+             "swap A/B" if layout == "n64" else "swap ABXY"),
+            ([z_art, "sep+", start_art], "P1", p1c, "hold to quit"),
         ]
     else:
         items = [
@@ -3332,7 +3744,8 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 # see, not the one in the player's hands, so it follows the emulator: a
 # GameCube game gets a GameCube map. Anything not listed gets the Switch one,
 # which is also what an unrecognised target falls back to.
-BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube"}
+BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
+                  "gopher64": "n64"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -3445,6 +3858,9 @@ BACKEND_ENV = {
     "eden": (VIRTUAL_PAD_HINT, EDEN_NO_HIDAPI),
     # Cemu's flatpak links the freedesktop runtime's SDL 2.32: same story.
     "cemu": (VIRTUAL_PAD_HINT,),
+    # gopher64 links SDL3 statically, which hides the virtual pads just the
+    # same; its own CLI is given the hint the same way (gopher_run).
+    "gopher64": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -3554,6 +3970,8 @@ def main():
         cfg_path = eden_config_target(app_id, exe)
     elif backend == "cemu":
         cfg_path = cemu_config_target(app_id, exe)
+    elif backend == "gopher64":
+        cfg_path = find_gopher_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -3649,7 +4067,9 @@ def main():
             read_axes(sdl, pads, axes_logged)
             if update_trigger_swap(pads, armed):
                 remember(pads, known)
-            if layout_for(backend) == "gamecube":
+            # Both of these pads quit through Z+Start: neither has a
+            # second button to spare for it.
+            if layout_for(backend) in ("gamecube", "n64"):
                 update_gc_holds(pads, holding, now)
 
             holds = {}
@@ -3796,6 +4216,8 @@ def main():
                 problems = write_dolphin_config(cfg_path, pads)
             elif backend == "cemu":
                 problems = write_cemu_config(cfg_path, pads, p1_pro)
+            elif backend == "gopher64":
+                problems = write_gopher_config(cfg_path, pads, app_id, exe)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:

@@ -73,6 +73,15 @@ GC_ARMS = ("dpad_up", "dpad_down", "dpad_left", "dpad_right")
 
 SWITCH_FACES = ("a", "b", "x", "y")
 
+N64_DIR = os.path.join(SWITCH_DIR, "n64")
+# Drawn by the user to match Kenney's hand, since the pack has no N64 set.
+# Colour is dropped on the way in like everything else — the map tints what
+# it draws — except the C buttons, which are yellow on the pad and stay so.
+N64_ICONS = os.path.join("..", "selfsteam assets", "n64 kenney'd icons",
+                         "png", "512")
+N64_SIDE = 128                     # the canvas every other glyph here uses
+N64_INK = 0.78                     # how much of it the ink fills
+
 
 def components(mask):
     """Connected runs of ink in an alpha channel, largest first.
@@ -360,6 +369,190 @@ def switch_faces():
     return 2 * len(SWITCH_FACES)
 
 
+def fit(im, side=N64_SIDE, ink=N64_INK, square=True):
+    """One glyph, its ink scaled to the same fraction of the same canvas.
+
+    The layout file gives each N64 button a SIZE, and a size only means
+    something if every glyph wears its margin the same way. Kenney's own
+    canvases do not: a shoulder pill and a face circle are drawn with
+    different air around them. `square=False` keeps a wide glyph's
+    proportions, for the shoulders.
+    """
+    box = im.getchannel("A").getbbox()
+    cut = im.crop(box)
+    if square:
+        scale = side * ink / max(cut.size)
+    else:
+        scale = side * ink / cut.size[0]
+    size = (max(1, int(round(cut.size[0] * scale))),
+            max(1, int(round(cut.size[1] * scale))))
+    patch = cut.resize(size, Image.LANCZOS)
+    out = Image.new("RGBA", (side, side), (255, 255, 255, 0))
+    out.paste(patch, ((side - size[0]) // 2, (side - size[1]) // 2))
+    return out
+
+
+def fit_like(im, model, side=N64_SIDE, ink=N64_INK, square=True):
+    """Place one glyph using ANOTHER's framing.
+
+    A label is not a glyph in its own right: it belongs at the size and place
+    its ring puts it. Fitting it on its own blew every letter up to fill the
+    canvas, which put A's serif outside A's circle.
+    """
+    box = model.getchannel("A").getbbox()
+    scale = side * ink / (max(box[2] - box[0], box[3] - box[1]) if square
+                          else box[2] - box[0])
+    size = (max(1, int(round(im.size[0] * scale))),
+            max(1, int(round(im.size[1] * scale))))
+    patch = im.resize(size, Image.LANCZOS)
+    out = Image.new("RGBA", (side, side), (255, 255, 255, 0))
+    # Where the model's ink lands, so everything drawn with it lands with it.
+    cx = (box[0] + box[2]) / 2 * scale
+    cy = (box[1] + box[3]) / 2 * scale
+    out.paste(patch, (int(round(side / 2 - cx)), int(round(side / 2 - cy))))
+    return out
+
+
+def solid(shape, letter=None, colour=None):
+    """The shape filled in, with any label left as a hole.
+
+    This is what Kenney's filled twin looks like, and the pack has one for
+    every glyph it draws. These are outlines only, so the twin is derived:
+    close the ring, then punch the label back out.
+
+    The fill takes its colour from `colour`, because the pixels being filled
+    were transparent and carry whatever RGB the canvas was made with — which
+    is how the first yellow C button came out with a white middle.
+    """
+    disc = fill_holes(shape)
+    if colour is not None:
+        tint = Image.new("RGBA", disc.size, colour)
+        tint.putalpha(disc.getchannel("A"))
+        disc = tint
+    if letter is not None:
+        disc.putalpha(ImageChops.subtract(disc.getchannel("A"),
+                                          letter.getchannel("A")))
+    return disc
+
+
+def ink_colour(im):
+    """The colour of a glyph's own ink, as the fill should be."""
+    px = im.load()
+    for y in range(im.size[1]):
+        for x in range(im.size[0]):
+            r, g, b, a = px[x, y]
+            if a > 200:
+                return (r, g, b, 255)
+    return (255, 255, 255, 255)
+
+
+def n64_source(name):
+    here = os.path.join(HERE, N64_ICONS, f"n64-{name}.png")
+    return Image.open(here).convert("RGBA")
+
+
+def n64_part(im, part, keep_colour=False):
+    """One piece of a multi-button glyph, on a canvas of its own.
+
+    The C cluster arrives as a single picture of four buttons and a C. Each
+    button has to light on its own, so each is cut out here — the same reason
+    the d-pad's arms are cut out of its cross.
+    """
+    out = Image.new("RGBA", im.size, (255, 255, 255, 0))
+    for x, y in part:
+        px = im.getpixel((x, y))
+        out.putpixel((x, y), px if keep_colour else (255, 255, 255, px[3]))
+    return out
+
+
+def n64():
+    """The N64 set, from the user's own icons plus art already staged."""
+    os.makedirs(N64_DIR, exist_ok=True)
+    count = 0
+
+    # Face buttons: the ring alone, the label alone, and a solid press. Same
+    # three layers as every other map's faces.
+    for key in ("a", "b"):
+        ring, letter = split_letter(white(n64_source(key)))
+        if letter is None:
+            sys.exit(f"n64-{key}.png: expected a label inside the ring")
+        flat = ring.copy()
+        flat.alpha_composite(letter)
+        fit_like(flat, flat).save(os.path.join(N64_DIR, key + ".png"))
+        fit_like(letter, flat).save(os.path.join(N64_DIR, key + "_letter.png"))
+        fit_like(press_from(solid(ring, colour=ink_colour(ring))),
+                 flat).save(os.path.join(N64_DIR, key + "_press.png"))
+        count += 3
+
+    # Z and the shoulders: one picture each, plus its filled twin. The
+    # shoulders keep their proportions — they are wide, and squaring them
+    # would turn a pill into a circle.
+    for key, square in (("z", True), ("l", False), ("r", False)):
+        shape, letter = split_letter(white(n64_source(key)))
+        flat = shape.copy()
+        if letter is not None:
+            flat.alpha_composite(letter)
+        fit_like(flat, flat, square=square).save(
+            os.path.join(N64_DIR, key + ".png"))
+        fit_like(solid(shape, letter, colour=ink_colour(shape)), flat,
+                 square=square).save(
+            os.path.join(N64_DIR, key + "_on.png"))
+        count += 2
+
+    # Start: the ring without its caption, exactly as the GameCube map's is.
+    # Start keeps its caption here, unlike the GameCube map's: the icon was
+    # drawn with START inside the ring rather than above it, so it fits.
+    start = white(n64_source("start"))
+    # Both pieces in the SOURCE's own coordinates: start_button rescales what
+    # it returns, so filling that and subtracting a caption measured here put
+    # the two on different grids and the fill never landed.
+    pieces = components(start.getchannel("A"))
+    ring = n64_part(start, pieces[0])
+    caption = Image.new("RGBA", start.size, (255, 255, 255, 0))
+    for part in pieces[1:]:
+        caption.alpha_composite(n64_part(start, part))
+    fit_like(start, start).save(os.path.join(N64_DIR, "start_plain.png"))
+    filled = solid(ring, colour=ink_colour(ring))
+    filled.putalpha(ImageChops.subtract(filled.getchannel("A"),
+                                        caption.getchannel("A")))
+    fit_like(filled, start).save(
+        os.path.join(N64_DIR, "start_plain_on.png"))
+    count += 2
+
+    # The C cluster: four buttons and a C, cut apart. Yellow is kept — these
+    # are the yellow buttons, and tinting them a player colour loses the one
+    # thing that says what they are.
+    cluster = n64_source("c-pad")
+    parts = components(cluster.getchannel("A"))
+    rings = sorted(parts[:4], key=lambda p: (min(y for _x, y in p),
+                                             min(x for x, _y in p)))
+    arrows = sorted(parts[5:9], key=lambda p: (min(y for _x, y in p),
+                                               min(x for x, _y in p)))
+    order = ("c_up", "c_left", "c_right", "c_down")
+    for key, ring_pts, arrow_pts in zip(order, rings, arrows):
+        ring = n64_part(cluster, ring_pts, keep_colour=True)
+        arrow = n64_part(cluster, arrow_pts, keep_colour=True)
+        flat = ring.copy()
+        flat.alpha_composite(arrow)
+        fit_like(flat, flat).save(os.path.join(N64_DIR, key + ".png"))
+        fit_like(solid(ring, arrow, colour=ink_colour(ring)), flat).save(os.path.join(N64_DIR, key + "_on.png"))
+        count += 2
+    # The C in the middle is a label, not a button: it never lights.
+    fit(n64_part(cluster, parts[4], keep_colour=True)).save(
+        os.path.join(N64_DIR, "c.png"))
+    count += 1
+
+    # The d-pad is the Switch one, as asked, and the stick the GameCube's:
+    # both are already staged, so they are copied rather than rebuilt.
+    for name in ("dpad", "dpad_up", "dpad_down", "dpad_left", "dpad_right"):
+        shutil.copyfile(os.path.join(SWITCH_DIR, name + ".png"),
+                        os.path.join(N64_DIR, name + ".png"))
+        count += 1
+    shutil.copyfile(os.path.join(GC_DIR, "stick_l.png"),
+                    os.path.join(N64_DIR, "stick_l.png"))
+    return count + 1
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
@@ -367,7 +560,7 @@ def main():
     licence = os.path.join(pack, "License.txt")
     if not os.path.isdir(os.path.join(pack, GC_PACK)):
         sys.exit(f"no {GC_PACK} in {pack}")
-    staged = gamecube(pack)
+    staged = gamecube(pack) + n64()
     derived = switch_faces()
     if os.path.isfile(licence):
         shutil.copyfile(licence, os.path.join(SWITCH_DIR, "LICENSE-kenney.txt"))

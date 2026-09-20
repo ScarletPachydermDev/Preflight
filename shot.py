@@ -108,7 +108,7 @@ def main():
     ap.add_argument("--alert", help="text for the alert band")
     ap.add_argument("--wiiu", choices=("gamepad", "pro"),
                     help="draw the Cemu legend, with P1 as this controller")
-    ap.add_argument("--layout", default="switch", choices=("switch", "gamecube"),
+    ap.add_argument("--layout", default="switch", choices=("switch", "gamecube", "n64"),
                     help="which pad the map describes; gamecube is Dolphin's")
     ap.add_argument("--press", action="append", default=[], metavar="SLOT:NAMES",
                     help="hold these buttons on that pad, e.g. 2:a,start,dpad_up")
