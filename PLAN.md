@@ -347,9 +347,12 @@ a report of "button X does the wrong thing" has to start with the press log.
 - **A pad shows `Steam pad xxxx` until someone touches it.** The hardware
   pairing needs a press — and a QUIET one: pairing is skipped while another
   pad is being pressed, since a node that fired 200ms ago belongs to whoever
-  pressed it rather than to the next pad to ask — within 60ms, not the 250ms
+  pressed it rather than to the next pad to ask — within 150ms, not the 250ms
   the events are kept for: presses land on both devices in the same instant,
   and a quarter-second is long enough for somebody else's press to be stolen.
+  60ms was tried first and was too tight: pairing failed on one run where
+  every pad was pressed and worked on the next, which is a race. A press
+  that identifies nothing is now logged rather than passing in silence.
   **An unpressed pad is not merely unnamed.** Identification is what says
   whether a pad wears Nintendo lettering, and that decides which way its
   face buttons are bound — an 8bitdo nobody touched on the check screen

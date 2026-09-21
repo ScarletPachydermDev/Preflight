@@ -639,10 +639,17 @@ class RealWatcher:
     WINDOW_MS = 250
     # How fresh a real device's event must be to be claimed by a virtual pad.
     # The window above is how long events are kept; this is how close to the
-    # press they have to be. At 250ms a pad could claim the node of someone
-    # who pressed a quarter-second earlier, which is how a Steam Controller
-    # ended up wearing an 8bitdo's name.
-    CLAIM_MS = 60
+    # press they have to be.
+    #
+    # 250ms let a pad claim the node of someone who had pressed a quarter of
+    # a second earlier, which is how a Steam Controller ended up wearing an
+    # 8bitdo's name. 60ms was the correction and it was too tight: pairing
+    # then failed on a run where every pad was pressed, and succeeded on the
+    # next — a race, which is the worst kind of bug to leave in. The theft
+    # case is already prevented by the caller, which refuses to pair while
+    # another pad is being pressed at all, so this only has to be tight
+    # enough to rule out a stale event.
+    CLAIM_MS = 150
 
     def __init__(self):
         self.fds = {}
@@ -4536,6 +4543,7 @@ def main():
     presses_logged = [0]
     axes_logged = set()
     last_press = {}         # pad key -> tick, for the pairing guard above
+    pairing_logged = [0]
 
     def rescan():
         """Rebuild the pad list, preserving what each pad was doing."""
@@ -4704,6 +4712,16 @@ def main():
                     hit = reals.claim(now, taken)
                     if hit:
                         bind_real(pad, hit, known, pads)
+                    elif pairing_logged[0] < 12:
+                        # Say when a press went by without identifying the
+                        # pad: silence here reads as "nothing to see", and
+                        # what it actually means is that this pad's face
+                        # buttons are about to be a guess.
+                        pairing_logged[0] += 1
+                        print(f"pair: no device matched P{pad.slot or '-'} "
+                              f"{pad.display} ({len(reals.recent)} recent "
+                              f"event(s), {len(taken)} already claimed)",
+                              flush=True)
                 last_press[pad.key] = now
 
                 if state == "error":
