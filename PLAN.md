@@ -347,7 +347,9 @@ a report of "button X does the wrong thing" has to start with the press log.
 - **A pad shows `Steam pad xxxx` until someone touches it.** The hardware
   pairing needs a press — and a QUIET one: pairing is skipped while another
   pad is being pressed, since a node that fired 200ms ago belongs to whoever
-  pressed it rather than to the next pad to ask. A Steam Controller never
+  pressed it rather than to the next pad to ask — within 60ms, not the 250ms
+  the events are kept for: presses land on both devices in the same instant,
+  and a quarter-second is long enough for somebody else's press to be stolen. A Steam Controller never
   pairs at all: Steam holds it at hidraw level, so it has no kernel node, and
   left to itself it took an 8bitdo's (2026-09-21), wore its name and
   inherited its Nintendo button layout with it.
@@ -450,14 +452,20 @@ proves too slow, the better design is a per-pad setting confirmed once on the
 check screen and remembered, rather than a table trying to know every
 manufacturer.
 
-**Shapes are positions, but SDL's letters are not.** Measured on an 8Bitdo
-SF30 Pro in X-input mode, through Steam Input (2026-09-21): pressing the
-BOTTOM button lit circle and pressing east lit cross. Steam feeds a
-Nintendo-lettered pad's labelled A through as SDL's A, so the pad arrives
-already swapped and nothing downstream can see it. The map and the bindings
-therefore compensate from the pad's own hardware — `nintendo_layout()`, which
-now knows 8BitDo's vendor (0x2dc8) as well as Nintendo's — automatically,
-with nothing for the player to set.
+**Shapes are positions, but SDL's letters are not — sometimes.** Measured
+both ways on an 8Bitdo SF30 Pro in X-input mode (2026-09-21):
+
+| | what south reports | compensation |
+|---|---|---|
+| Steam Input ON | `B` — Steam feeds the labelled A through as SDL's A | needed |
+| Steam Input OFF | `A` — SDL maps by position | none, and applying it puts cross on the east button |
+
+So the question is never "is this a Nintendo pad" but **"is Steam relabelling
+it"**: `steam_relabelled()` is Nintendo lettering (`nintendo_layout()`, which
+knows 8BitDo's vendor 0x2dc8 as well as Nintendo's 0x057E) behind a Steam
+virtual pad. Compensating on the hardware alone was the first fix and it was
+wrong the moment Steam Input was turned off — the map and the bindings
+inverted the other way, which is exactly what made this visible.
 
 **The swap GESTURE is disabled on this map.** Every other map
 swaps because a LETTER can lie about position: the button marked A is in

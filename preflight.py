@@ -96,6 +96,27 @@ def is_steam_controller(pad):
     return False
 
 
+def steam_relabelled(pad):
+    """True when this pad's SDL letters are LABELS rather than positions.
+
+    Not a property of the hardware but of what is between it and us. Measured
+    both ways on an 8Bitdo SF30 Pro (2026-09-21):
+
+      Steam Input ON  — the pad arrives as a Steam virtual pad and Steam
+                        feeds its labelled A through as SDL's A, which sits
+                        east. Pressing south gave B. Compensation needed.
+      Steam Input OFF — the pad arrives as itself and SDL maps it by
+                        position. Pressing south gave A. Compensating then
+                        swaps it the WRONG way, which is what put cross on
+                        the east button.
+
+    So the question is never "is this a Nintendo pad" but "is Steam
+    relabelling it": Nintendo lettering behind a Steam virtual pad.
+    """
+    return (nintendo_layout(pad)
+            and (pad.vendor, pad.product) == STEAM_VIRTUAL)
+
+
 def nintendo_layout(pad):
     """True when this pad's A and B are the other way round from SDL's.
 
@@ -616,6 +637,12 @@ class RealWatcher:
     """
 
     WINDOW_MS = 250
+    # How fresh a real device's event must be to be claimed by a virtual pad.
+    # The window above is how long events are kept; this is how close to the
+    # press they have to be. At 250ms a pad could claim the node of someone
+    # who pressed a quarter-second earlier, which is how a Steam Controller
+    # ended up wearing an 8bitdo's name.
+    CLAIM_MS = 60
 
     def __init__(self):
         self.fds = {}
@@ -671,7 +698,7 @@ class RealWatcher:
         guess, so that case is skipped rather than risking a wrong label.
         """
         hits = [i for t, i in self.recent
-                if now - t <= self.WINDOW_MS and i["path"] not in taken]
+                if now - t <= self.CLAIM_MS and i["path"] not in taken]
         if not hits:
             return None
         paths = {i["path"] for i in hits}
@@ -1700,6 +1727,7 @@ def log_layouts(pads):
               f" gc='{p.gc_name}' | hardware="
               f"{real.get('name', 'none')} [{ids}]"
               f" | nintendo_layout={nintendo_layout(p)}"
+              f" relabelled={steam_relabelled(p)}"
               f" | swap_faces={p.swap_faces}", flush=True)
 
 
@@ -2014,7 +2042,7 @@ def duck_pad_rows(pad, player):
     """One [PadN] section: a DualShock wired to this pad."""
     # By position, which on a Nintendo-lettered pad means the other way
     # round from SDL's letters — see DUCK_FACE_NINTENDO.
-    face = (DUCK_FACE_NINTENDO if nintendo_layout(pad)
+    face = (DUCK_FACE_NINTENDO if steam_relabelled(pad)
             else DUCK_FACE_IDENTITY)
     buttons = dict(DUCK_BUTTON, **face)
     rows = [("Type", "AnalogController")]
@@ -4132,7 +4160,7 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
                      # The PlayStation map takes the pad's hardware layout
                      # rather than its swap setting: shapes are positions,
                      # and a Nintendo-lettered pad reports labels.
-                     swap=((nintendo_layout(pad) if layout == "playstation"
+                     swap=((steam_relabelled(pad) if layout == "playstation"
                             else pad.swap_faces) if pad else False),
                      dim=pad is None,
                      holds=holds.get(pad.key) if pad else None,
@@ -4467,6 +4495,7 @@ def main():
           f"{len(binding_gaps)} binding gap(s); entering loop", flush=True)
     label_pads(pads)
     log_pads(pads, "scan")
+    log_layouts(pads)
 
     state = "roster"
     claimed_p1 = None       # key of the pad that took P1; one claim per session
