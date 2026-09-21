@@ -1681,6 +1681,25 @@ def steam_input_off(pads):
     return any((p.vendor, p.product) != VALVE_VIRTUAL for p in pads)
 
 
+def log_layouts(pads):
+    """What this tool believes each pad IS, at the moment it matters.
+
+    Every face-button bug this week has come down to one of these facts
+    disagreeing with the pad in someone's hands: which hardware it paired to,
+    whether that hardware letters its buttons Nintendo-style, and therefore
+    which way the shapes get bound. Printed together, the next such report is
+    a lookup rather than an investigation.
+    """
+    for p in sorted(pads, key=lambda q: q.slot or 9):
+        if not p.slot:
+            continue
+        print(f"layout: P{p.slot} {p.display} | sdl='{p.name}'"
+              f" gc='{p.gc_name}' | hardware="
+              f"{p.real['name'] if p.real else 'none'}"
+              f" | nintendo_layout={nintendo_layout(p)}"
+              f" | swap_faces={p.swap_faces}", flush=True)
+
+
 def log_pads(pads, when):
     """One line per pad into launch.log. Counts alone are not enough: when a
     run misbehaves the question is always *which* pads were seen, and with
@@ -4687,6 +4706,7 @@ def main():
                 continue
             remember(pads, known)
             log_pads(pads, "writing")
+            log_layouts(pads)
             if backend == "eden":
                 problems = write_eden_config(cfg_path, pads, sdl)
             elif backend in ("dolphin", "wheelwizard"):
