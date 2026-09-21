@@ -346,6 +346,13 @@ a report of "button X does the wrong thing" has to start with the press log.
   preflight gets no Ryujinx binding at all.
 - **A pad shows `Steam pad xxxx` until someone touches it.** The hardware
   pairing needs a press.
+- **Steam Input's off switch is per-pad, not per-game.** Measured 2026-09-21:
+  with Steam Input disabled for a shortcut, other pads arrive as themselves —
+  their own Bluetooth GUIDs reach the config — while the Steam Controller
+  still comes through as a Steam Virtual Gamepad. It has no unvirtualised
+  mode to fall back to, so a family session is routinely a MIXED set, and
+  anything here that assumes "Steam Input on" or "off" as a global state is
+  wrong.
 - Mario Kart asks for the Switch's `ShowControllerSupport` applet and Ryujinx
   stubs it (`ControllerApplet ReturnResult 1 1`). Not caused here, but it is
   why that title screen behaves oddly.
@@ -803,7 +810,8 @@ those games listed afterwards so artwork and the toggle can be changed later.
   debug port instead; that needs Steam started with remote debugging, which is
   not on by default, so the link is the cheaper route.
 - Cemu and gopher64 have only been run as flatpaks. Their AppImage and
-  portable paths are written and unexercised.
+  portable paths are written and will stay unexercised: SelfSteam offers
+  neither as an install type, so there is nothing to test them from.
 - Eden with Steam Input OFF is still unexplained (§6).
 
 ## 10. Gotchas seen more than once
