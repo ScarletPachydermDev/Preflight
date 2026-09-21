@@ -781,6 +781,25 @@ those games listed afterwards so artwork and the toggle can be changed later.
 - Optional: a sit-out control for a pad that is awake but not playing.
 - Possible upstream fix: have Ryubing key on SDL serial/MAC rather than
   enumeration index, which would make most of this unnecessary.
+- **Steam Input layouts can be applied from outside Steam**, proven on the
+  machine 2026-09-20: `steam://controllerconfig/<shortcut appid>/<published
+  workshop id>` reaches a running Steam, prompts once, and applies the layout
+  to a shortcut that had never used it. Only PUBLISHED layouts work — a
+  private one has no id and no local file. The layout itself lands in
+  `userdata/<id>/ugc/referenced/<hash>/<id>_controller_config.vdf`, but the
+  SELECTION is cloud-only: nothing on disk says which layout a shortcut uses,
+  so it can be set and never read back. A second prompt (Controller Conflict)
+  appears when the account already has a cloud layout for that shortcut. This
+  is how SelfSteam could ship a layout with an emulator — e.g. the N64 C-button
+  shift, which gopher64 itself cannot express. SteamInputDB
+  (github.com/Alia5/steaminputdb.com) does the same thing through Steam's CEF
+  debug port instead; that needs Steam started with remote debugging, which is
+  not on by default, so the link is the cheaper route.
+- Cemu multiplayer is untested on the TV: P2-P4 write Pro Controller profiles
+  through the same code path as P1, but two real pads have never been tried.
+- Cemu and gopher64 have only been run as flatpaks. Their AppImage and
+  portable paths are written and unexercised.
+- Eden with Steam Input OFF is still unexplained (§6).
 
 ## 10. Gotchas seen more than once
 
