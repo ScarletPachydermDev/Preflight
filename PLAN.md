@@ -478,6 +478,20 @@ proves too slow, the better design is a per-pad setting confirmed once on the
 check screen and remembered, rather than a table trying to know every
 manufacturer.
 
+**With Steam Input OFF this backend is on thin ice, and that is documented
+rather than solved.** Measured repeatedly on 2026-09-21: some pads then arrive
+raw (Xbox, Stadia) while others still come through Steam (the 8bitdo, the
+Steam Controller), because Steam's per-type support is global. A pad in that
+state is often unidentifiable — Steam names its virtual pad generically and
+the hardware's own node never speaks — so preflight cannot tell whether its
+letters are labels, and the face buttons come out swapped. Turning the pad off
+and on again while the check screen is up fixes it, because Steam then names
+the virtual pad after the hardware.
+
+Chasing this further was stopped deliberately: with Steam Input ON everything
+works, the README says so as it does for Eden, and the remaining failure has a
+one-line workaround.
+
 **Shapes are positions, but SDL's letters are not — sometimes.** Measured
 both ways on an 8Bitdo SF30 Pro in X-input mode (2026-09-21):
 
