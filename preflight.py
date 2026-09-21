@@ -1693,9 +1693,12 @@ def log_layouts(pads):
     for p in sorted(pads, key=lambda q: q.slot or 9):
         if not p.slot:
             continue
+        real = p.real or {}
+        ids = (f"{real.get('vendor', 0):04x}:{real.get('product', 0):04x}"
+               if real else f"{p.vendor:04x}:{p.product:04x} (virtual)")
         print(f"layout: P{p.slot} {p.display} | sdl='{p.name}'"
               f" gc='{p.gc_name}' | hardware="
-              f"{p.real['name'] if p.real else 'none'}"
+              f"{real.get('name', 'none')} [{ids}]"
               f" | nintendo_layout={nintendo_layout(p)}"
               f" | swap_faces={p.swap_faces}", flush=True)
 

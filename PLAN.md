@@ -438,6 +438,18 @@ The check screen draws a PlayStation map from Kenney's own PS set, with the
 a smudge at this size) and Select/Start keeping their captions, since the
 shapes alone — a box and a wedge — say nothing.
 
+**Which pads are Nintendo-lettered is preflight's own judgement**, not
+anything the OS or SDL reports: `nintendo_layout()` reads the PHYSICAL
+device's USB vendor (0x057E Nintendo, 0x2DC8 8BitDo) and falls back to a list
+of name hints. The vendor half is fact from sysfs; the name half is a guess,
+and it is what missed the 8bitdo first time round. A pad from an unlisted
+vendor therefore comes out inverted with no way for its owner to correct it —
+so the layout log prints the hardware's vendor:product, which is exactly what
+an issue report needs to carry for a new pad to be added. If that route
+proves too slow, the better design is a per-pad setting confirmed once on the
+check screen and remembered, rather than a table trying to know every
+manufacturer.
+
 **Shapes are positions, but SDL's letters are not.** Measured on an 8Bitdo
 SF30 Pro in X-input mode, through Steam Input (2026-09-21): pressing the
 BOTTOM button lit circle and pressing east lit cross. Steam feeds a
