@@ -655,6 +655,7 @@ class RealWatcher:
         self.fds = {}
         self.recent = []
         self.available = False
+        self.last_refresh = 0
 
     def open(self):
         return self.refresh()
@@ -679,7 +680,19 @@ class RealWatcher:
         self.available = bool(self.fds)
         return self.available
 
+    # How often to look for device nodes that were not there a moment ago.
+    # Opening only at startup and on a disconnect was wrong: a pad that
+    # reconnects — which a Bluetooth pad does whenever it wakes, with a new
+    # node and sometimes a new address — was then never watched at all, so
+    # every press on it was invisible and it could not be identified.
+    # Measured on an 8bitdo: "0 recent event(s)" while every button on it was
+    # being pressed.
+    REFRESH_MS = 1000
+
     def poll(self, now):
+        if now - self.last_refresh >= self.REFRESH_MS:
+            self.last_refresh = now
+            self.refresh()
         if not self.fds:
             return
         try:

@@ -353,7 +353,14 @@ a report of "button X does the wrong thing" has to start with the press log.
   60ms was tried first and was too tight: pairing failed on one run where
   every pad was pressed and worked on the next, which is a race. A press
   that identifies nothing is now logged rather than passing in silence.
-  **An unpressed pad is not merely unnamed.** Identification is what says
+  **A pad's node has to be WATCHED for a press to count.** The watcher used
+  to open nodes at startup and on a disconnect only, so a pad that reconnected
+  — which a Bluetooth pad does whenever it wakes, with a new node and
+  sometimes a new address — was never watched, and every press on it was
+  invisible. It now re-scans once a second. Symptom to recognise: "pair: no
+  device matched ... (0 recent event(s))" in the log while somebody is
+  hammering that very pad.
+- **An unpressed pad is not merely unnamed.** Identification is what says
   whether a pad wears Nintendo lettering, and that decides which way its
   face buttons are bound — an 8bitdo nobody touched on the check screen
   went into the game inverted (2026-09-21). The roster now says so when a
