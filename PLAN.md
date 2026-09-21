@@ -486,10 +486,14 @@ recording:
   Names now include the paired hardware's own, and anything still unmatched
   disables its port instead of stopping the game — unless it is P1's.
 
-**Rumble is not possible.** It is the Rumble Pak, chosen at runtime by holding
-the hotkey and pressing B, and gopher64 hard-codes MemPak at startup for every
-game but Chameleon Twist (`get_default_handler`). No config field, so nothing
-to write. Requested upstream.
+**Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
+runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
+at startup for every game but Chameleon Twist (`get_default_handler`). No
+config field, so nothing preflight can write. Upstream does not take feature
+requests (bug-report template only, blank issues disabled), so this is not
+being pursued there either — and no hint is shown on the check screen, since
+the map is for testing inputs, not for teaching another program's hotkeys.
+Anyone who wants rumble presses Select+B per player, per session.
 
 Untested so far: the AppImage and portable paths.
 
