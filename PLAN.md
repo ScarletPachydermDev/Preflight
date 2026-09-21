@@ -428,8 +428,18 @@ the two now agree instead of overwriting each other at every launch.
 - Face mapping is by POSITION, which is what the shapes are: Cross is the
   bottom button and so is SDL's A.
 
-Still to do: the check screen draws the Switch map, so it labels the face
-buttons A/B/X/Y. Kenney's pack has a PlayStation section for a real one.
+The check screen draws a PlayStation map from Kenney's own PS set, with the
+"alternative" shoulders and triggers (the plain L2 carries a lip that reads as
+a smudge at this size) and Select/Start keeping their captions, since the
+shapes alone — a box and a wedge — say nothing.
+
+**This map has no swap, and the gesture is disabled on it.** Every other map
+swaps because a LETTER can lie about position: the button marked A is in
+different places on a Switch pad and an Xbox pad. A shape cannot lie — north
+is triangle, south cross, east circle, west square, on every pad — so the
+bindings are written by position with no mirrored variant, the badge is not
+drawn, and the two triggers do nothing. That last part matters: swap state
+follows a pad to the OTHER emulators, where it does act.
 
 **gopher64, as of 2026-09-20.** Built from its own source (`src/ui/`) and a
 config it wrote: `config.json` keeps named input profiles, each an array of 19

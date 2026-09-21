@@ -1850,8 +1850,9 @@ DUCK_KEYS = {
 # Mirrored swaps the pairs, as on every other map here.
 DUCK_FACE_IDENTITY = {"cross": "A", "circle": "B", "square": "X",
                       "triangle": "Y"}
-DUCK_FACE_MIRRORED = {"cross": "B", "circle": "A", "square": "Y",
-                      "triangle": "X"}
+# There is no mirrored twin here, unlike every other backend: north is
+# triangle and south is cross on every pad, so the swap gesture has nothing
+# to act on.
 
 # Two ports, and a multitap on port 1 makes four. The pads are not numbered
 # consecutively when it is on: port 0 takes slots 0-3 as pads 0, 2, 3, 4
@@ -1969,8 +1970,8 @@ def find_duck_config(exe=None):
 
 def duck_pad_rows(pad, player):
     """One [PadN] section: a DualShock wired to this pad."""
-    face = DUCK_FACE_MIRRORED if pad.swap_faces else DUCK_FACE_IDENTITY
-    buttons = dict(DUCK_BUTTON, **face)
+    # Never mirrored: a shape is a position, not a label (see PS_FACES).
+    buttons = dict(DUCK_BUTTON, **DUCK_FACE_IDENTITY)
     rows = [("Type", "AnalogController")]
     for role, key in DUCK_KEYS.items():
         if role in buttons:
@@ -3241,9 +3242,12 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
     if dh > bh:
         dw, dh = bh * aspect, bh
     g = Bay(ui, bx + (bw - dw) / 2, by + (bh - dh) / 2, dw, dh, col, bg, dim,
-            art={"gamecube": "gc/", "n64": "n64/"}.get(layout, ""))
+            art={"gamecube": "gc/", "n64": "n64/",
+                 "playstation": "ps/"}.get(layout, ""))
     controls = {"gamecube": _gamecube_controls,
-                "n64": _n64_controls}.get(layout, _switch_controls)
+                "n64": _n64_controls,
+                "playstation": _playstation_controls}.get(
+                    layout, _switch_controls)
     controls(g, held, axes, swap, holds or {}, wys)
 
 
@@ -3373,6 +3377,53 @@ def _switch_controls(g, held, axes, swap, holds, wys):
     live = face_live(held, swap)
     for letter, name, dx, dy in (("X", "x", 0, -1), ("Y", "y", -1, 0),
                                  ("A", "a", 1, 0), ("B", "b", 0, 1)):
+        g.face(name, lay.centres[3] + dx * lay.fspread,
+               lay.row_y + dy * lay.fspread, lay.fside,
+               pressed=letter in live, wys=wys)
+
+    for lane, btn, ax, ay, name in ((1, BTN_LSTICK, 0, 1, "stick_l"),
+                                    (2, BTN_RSTICK, 2, 3, "stick_r")):
+        stick(g, lay.centres[lane], lay.row_y, lay.sside, lay.stravel,
+              axes, ax, ay, name, on(btn))
+
+
+# A DualShock in the shared skeleton, which it fits without adjustment: the
+# triggers outermost, the shoulders inboard of them, Select and Start in the
+# middle, and the four shapes in a diamond.
+#
+# This map has NO swap, and cannot need one. The other maps swap because a
+# letter can lie: the button marked A is in different places on a Switch pad
+# and an Xbox pad. A shape is not a label, it is a position — north is
+# triangle, south cross, east circle, west square, on every pad ever made —
+# so there is nothing to mirror. Each shape is lit by the SDL button in its
+# own position, which is the same rule the bindings are written with.
+PS_CAPTION = 1.5
+
+PS_FACES = (("A", "cross", 0, 1), ("B", "circle", 1, 0),
+            ("X", "square", -1, 0), ("Y", "triangle", 0, -1))
+
+
+def _playstation_controls(g, held, axes, swap, holds, wys):
+    S = g.S
+    on = held.__contains__
+    lay = Layout(g)
+
+    draw_top_row(g, lay, (
+        Control(-lay.TRIGGER, "l2", S(0.31), axis=4),
+        Control(-lay.SHOULDER, "l1", S(0.31), (BTN_LSHOULDER,)),
+        Control(lay.SHOULDER, "r1", S(0.31), (BTN_RSHOULDER,)),
+        Control(lay.TRIGGER, "r2", S(0.31), axis=5),
+        # Bigger than the other maps' middle pair: these two wear their
+        # captions, so the box has to carry a word as well as a shape. At
+        # the shared size the words were there but unreadable.
+        Control(-lay.INNER, "select", S(0.21 * PS_CAPTION), (BTN_BACK,)),
+        Control(lay.INNER, "start", S(0.21 * PS_CAPTION), (BTN_START,)),
+    ), holds, held, axes)
+
+    dpad_arms(g, lay.centres[0], lay.row_y, lay.dside, held)
+
+    live = face_live(held, False)      # never swapped; see PS_FACES above
+    for letter, name, dx, dy in PS_FACES:
         g.face(name, lay.centres[3] + dx * lay.fspread,
                lay.row_y + dy * lay.fspread, lay.fside,
                pressed=letter in live, wys=wys)
@@ -3804,6 +3855,10 @@ GLYPH_ART = {
     # The N64 set. Start keeps its caption on this map, so the legend shows
     # the same button the map does.
     "n64:z": ("n64/z", 1.0), "n64:start": ("n64/start_plain", 1.0),
+    # The PlayStation set. Its shoulders and triggers are wide like the
+    # GameCube's, so they take the same widening.
+    "ps:l2": ("ps/l2", 1.15), "ps:r2": ("ps/r2", 1.15),
+    "ps:select": ("ps/select", 1.0), "ps:start": ("ps/start", 1.0),
 }
 
 
@@ -4001,7 +4056,8 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
             # the corner reads as one column of facts about the pad.
             corner = cx + cw - int(ch * 0.06) - bw / 2
             swap_y = cy + int(ch * 0.13) + bh / 2 + ch * 0.04 + ch * 0.075
-        if pad and pad.swap_faces:
+        # The swap badge means nothing on a map that cannot swap.
+        if pad and pad.swap_faces and layout != "playstation":
             # Badged in the corner rather than on the pad itself — there is no
             # room among the buttons, and a non-default mapping deserves to be
             # visible from across the room.
@@ -4063,6 +4119,14 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
              "swap A/B" if layout == "n64" else "swap ABXY"),
             ([z_art, "sep+", start_art], "P1", p1c, "hold to quit"),
         ]
+    elif layout == "playstation":
+        # No swap entry: the shapes are positions, so there is nothing to
+        # swap and nothing to explain.
+        items = [
+            (["ps:start"], "P1", p1c, "hold to start"),
+            claim,
+            (["ps:select"], "P1", p1c, "hold to quit"),
+        ]
     else:
         items = [
             (["+"], "P1", p1c, "hold to start"),
@@ -4098,7 +4162,7 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 # GameCube game gets a GameCube map. Anything not listed gets the Switch one,
 # which is also what an unrecognised target falls back to.
 BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
-                  "gopher64": "n64"}
+                  "gopher64": "n64", "duckstation": "playstation"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -4423,7 +4487,12 @@ def main():
                                 "will appear here.")
 
             read_axes(sdl, pads, axes_logged)
-            if update_trigger_swap(pads, armed):
+            # No swap gesture on a map that cannot swap: a PlayStation pad's
+            # shapes are positions, so the two triggers would flip a setting
+            # with nothing to act on — and a pad carries that setting across
+            # to the other emulators, where it very much does act.
+            if (layout_for(backend) != "playstation"
+                    and update_trigger_swap(pads, armed)):
                 remember(pads, known)
             # Both of these pads quit through Z+Start: neither has a
             # second button to spare for it.

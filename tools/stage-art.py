@@ -73,6 +73,30 @@ GC_ARMS = ("dpad_up", "dpad_down", "dpad_left", "dpad_right")
 
 SWITCH_FACES = ("a", "b", "x", "y")
 
+PS_DIR = os.path.join(SWITCH_DIR, "ps")
+PS_PACK = os.path.join("PlayStation Series", "Double")
+# The shapes, each with a filled twin in the pack.
+PS_FACES = {"cross": "playstation_button_cross",
+            "circle": "playstation_button_circle",
+            "square": "playstation_button_square",
+            "triangle": "playstation_button_triangle"}
+# The alternates for the shoulders and triggers: the plain L2 carries a lip
+# that reads as a smudge at this size, and the alternates are one family.
+PS_PAIRS = {"l1": "playstation_trigger_l1_alternative",
+            "r1": "playstation_trigger_r1_alternative",
+            "l2": "playstation_trigger_l2_alternative",
+            "r2": "playstation_trigger_r2_alternative"}
+# Select and Start keep their captions, unlike the GameCube map's Start:
+# these two are drawn with the word above the shape, and on a PlayStation pad
+# the word IS the button — the shapes alone are a rounded box and a wedge,
+# which say nothing.
+PS_CAPTIONED = {"select": "playstation3_button_select",
+                "start": "playstation3_button_start"}
+PS_PLAIN = {"dpad": "playstation_dpad",
+            "stick_l": "playstation_stick_top_l",
+            "stick_r": "playstation_stick_top_r"}
+PS_ARMS = ("dpad_up", "dpad_down", "dpad_left", "dpad_right")
+
 N64_DIR = os.path.join(SWITCH_DIR, "n64")
 # Drawn by the user to match Kenney's hand, since the pack has no N64 set.
 # Colour is dropped on the way in like everything else — the map tints what
@@ -559,6 +583,49 @@ def n64():
     return count + 1
 
 
+def ps_load(pack, name):
+    return Image.open(os.path.join(pack, PS_PACK, name + ".png")).convert("RGBA")
+
+
+def ps(pack):
+    """The PlayStation set, from the pack."""
+    os.makedirs(PS_DIR, exist_ok=True)
+    count = 0
+    for key, src in PS_FACES.items():
+        outline = white(ps_load(pack, src + "_outline"))
+        filled = white(ps_load(pack, src))
+        ring, shape = split_letter(outline)
+        if shape is None:
+            sys.exit(f"{src}: expected a shape inside the ring")
+        # The "label" here is the shape itself — a cross, a circle — and it
+        # is kept separate for the same reason a letter is: the ring turns
+        # green or amber, the shape stays white.
+        flat = ring.copy()
+        flat.alpha_composite(shape)
+        flat.save(os.path.join(PS_DIR, key + ".png"))
+        shape.save(os.path.join(PS_DIR, key + "_letter.png"))
+        press_from(filled).save(os.path.join(PS_DIR, key + "_press.png"))
+        count += 3
+    for key, src in PS_PAIRS.items():
+        white(ps_load(pack, src + "_outline")).save(
+            os.path.join(PS_DIR, key + ".png"))
+        white(ps_load(pack, src)).save(os.path.join(PS_DIR, key + "_on.png"))
+        count += 2
+    for key, src in PS_CAPTIONED.items():
+        white(ps_load(pack, src + "_outline")).save(
+            os.path.join(PS_DIR, key + ".png"))
+        white(ps_load(pack, src)).save(os.path.join(PS_DIR, key + "_on.png"))
+        count += 2
+    for key, src in PS_PLAIN.items():
+        white(ps_load(pack, src)).save(os.path.join(PS_DIR, key + ".png"))
+        count += 1
+    for key in PS_ARMS:
+        arm_only(ps_load(pack, "playstation_" + key)).save(
+            os.path.join(PS_DIR, key + ".png"))
+        count += 1
+    return count
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
@@ -566,7 +633,7 @@ def main():
     licence = os.path.join(pack, "License.txt")
     if not os.path.isdir(os.path.join(pack, GC_PACK)):
         sys.exit(f"no {GC_PACK} in {pack}")
-    staged = gamecube(pack) + n64()
+    staged = gamecube(pack) + n64() + ps(pack)
     derived = switch_faces()
     if os.path.isfile(licence):
         shutil.copyfile(licence, os.path.join(SWITCH_DIR, "LICENSE-kenney.txt"))
