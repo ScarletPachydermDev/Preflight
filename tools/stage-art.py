@@ -535,7 +535,13 @@ def n64():
         flat = ring.copy()
         flat.alpha_composite(arrow)
         fit_like(flat, flat).save(os.path.join(N64_DIR, key + ".png"))
-        fit_like(solid(ring, arrow, colour=ink_colour(ring)), flat).save(os.path.join(N64_DIR, key + "_on.png"))
+        # The PRESSED twin is white, unlike the idle glyph. Colour
+        # modulation can only darken, so a yellow fill tinted by a player's
+        # colour came out muddy gold rather than lighting up like every other
+        # button on the screen. Idle stays yellow — that is what says these
+        # are the C buttons — and the press reads as a press.
+        fit_like(white(solid(ring, arrow, colour=ink_colour(ring))),
+                 flat).save(os.path.join(N64_DIR, key + "_on.png"))
         count += 2
     # The C in the middle is a label, not a button: it never lights.
     fit(n64_part(cluster, parts[4], keep_colour=True)).save(
