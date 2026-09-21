@@ -349,7 +349,17 @@ a report of "button X does the wrong thing" has to start with the press log.
   pad is being pressed, since a node that fired 200ms ago belongs to whoever
   pressed it rather than to the next pad to ask — within 60ms, not the 250ms
   the events are kept for: presses land on both devices in the same instant,
-  and a quarter-second is long enough for somebody else's press to be stolen. A Steam Controller never
+  and a quarter-second is long enough for somebody else's press to be stolen.
+  **An unpressed pad is not merely unnamed.** Identification is what says
+  whether a pad wears Nintendo lettering, and that decides which way its
+  face buttons are bound — an 8bitdo nobody touched on the check screen
+  went into the game inverted (2026-09-21). The roster now says so when a
+  Nintendo-lettered device is present and unclaimed.
+- **Steam virtualises some pads even with Steam Input off for the game.**
+  Measured the same day: an Xbox and a Stadia pad arrived as themselves
+  while the 8bitdo still came through as a Steam virtual pad, because
+  Steam's per-type controller support is a global setting. So "Steam Input
+  is off" never means "every pad is raw". A Steam Controller never
   pairs at all: Steam holds it at hidraw level, so it has no kernel node, and
   left to itself it took an 8bitdo's (2026-09-21), wore its name and
   inherited its Nintendo button layout with it.

@@ -704,6 +704,25 @@ class RealWatcher:
         paths = {i["path"] for i in hits}
         return hits[-1] if len(paths) == 1 else None
 
+    def unclaimed_nintendo(self, pads):
+        """True when a Nintendo-lettered device is present but unpaired.
+
+        On its own an unpaired pad is harmless — it is only a name. It stops
+        being harmless when one of the real devices nobody has claimed is
+        Nintendo-lettered, because then the pad whose buttons are about to be
+        bound might be that one.
+        """
+        taken = {p.real["path"] for p in pads if p.real}
+        for info in self.fds.values():
+            if info["path"] in taken:
+                continue
+            shim = _Shim(name=info["name"], mac=info["mac"],
+                         vendor=info["vendor"], product=info["product"])
+            shim.real = None
+            if nintendo_layout(shim):
+                return True
+        return False
+
     def close(self):
         for fd in self.fds:
             try:
@@ -4564,6 +4583,21 @@ def main():
                 warnings.append(f"Ryujinx's saved controller settings are "
                                 f"missing {len(binding_gaps)} binding(s) "
                                 f"({binding_gaps[0]}) — will be repaired.")
+            # A pad nobody has pressed has not been paired to its hardware,
+            # and an unpaired pad is one this tool cannot identify: it does
+            # not know whether the thing in someone's hands wears Nintendo
+            # lettering, so it cannot tell whether Steam is relabelling it.
+            # Measured the hard way — an 8bitdo nobody touched on this screen
+            # went into the game with its face buttons the wrong way round.
+            strangers = [p for p in pads if p.slot and p.real is None
+                         and (p.vendor, p.product) == STEAM_VIRTUAL]
+            if strangers and reals.unclaimed_nintendo(pads):
+                warnings.append(
+                    f"Press a button on every pad: "
+                    f"{strangers[0].display} has not been identified yet, "
+                    f"and an unidentified pad can get its face buttons the "
+                    f"wrong way round.")
+
             for name in unmapped:
                 warnings.append(f"{name}: SDL has no mapping for this pad, "
                                 "so it cannot be used.")
