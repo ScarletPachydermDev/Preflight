@@ -455,6 +455,13 @@ SDL code each control takes. Notes worth keeping:
   The bay corner carries a Kenney Wii U GamePad/Pro badge, with the ABXY swap
   badge under it.
 
+**Three players confirmed on the TV 2026-09-21, with Steam Input both on and
+off.** Off is the more interesting half: the pads then arrive as themselves,
+and their own GUIDs went into the profiles (`0500...` Bluetooth ids for a
+Stadia and an Xbox Series pad) matched exactly, while a Steam Controller in
+the same run still came through as a virtual pad. So the per-GUID ordinal
+holds for real hardware and a mixed set, not just for virtual pads.
+
 Four players confirmed on the TV 2026-09-21, after two failures worth
 recording:
 
@@ -795,8 +802,6 @@ those games listed afterwards so artwork and the toggle can be changed later.
   (github.com/Alia5/steaminputdb.com) does the same thing through Steam's CEF
   debug port instead; that needs Steam started with remote debugging, which is
   not on by default, so the link is the cheaper route.
-- Cemu multiplayer is untested on the TV: P2-P4 write Pro Controller profiles
-  through the same code path as P1, but two real pads have never been tried.
 - Cemu and gopher64 have only been run as flatpaks. Their AppImage and
   portable paths are written and unexercised.
 - Eden with Steam Input OFF is still unexplained (§6).
