@@ -1905,6 +1905,17 @@ def gopher_controllers(app_id=None, exe=None):
     return names or None
 
 
+def gopher_names_for(pad):
+    """Every name this pad might be listed under, best guess first."""
+    wanted = [pad.real["name"] if pad.real else None,
+              kernel_name(pad), pad.gc_name, pad.name]
+    out = []
+    for name in wanted:
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
 def gopher_index_for(pad, names, used):
     """Which --list-controllers entry is this pad.
 
@@ -1914,13 +1925,34 @@ def gopher_index_for(pad, names, used):
     Dolphin's evdev names were. So every name this pad answers to is tried,
     and identical models are matched in order.
     """
-    wanted = [n for n in (pad.name, pad.gc_name, kernel_name(pad)) if n]
-    for want in wanted:
+    # The physical pad's own name first. Under Steam Input every pad reaches
+    # this tool as "Steam Virtual Gamepad", while gopher64 lists what the
+    # hardware is called — "Google Stadia Controller", "Xbox One controller".
+    # Measured with four pads paired: matching on SDL's name found none of
+    # them, and the pad we had paired to its hardware was the only one that
+    # matched at all.
+    for want in gopher_names_for(pad):
         for i, name in enumerate(names or ()):
             if i not in used and name == want:
                 used.add(i)
                 return i
     return None
+
+
+def gopher_path_for(pad):
+    """The device path gopher64 will open for this pad, when we can know it.
+
+    Its controller_assignment is a kernel device path, and for a Steam virtual
+    pad — which is every pad there is under Steam Input — our own SDL reports
+    exactly the same evdev node its SDL3 will: measured on the machine, four
+    virtual pads at event20/22/24/26 matched by GUID.
+
+    A physical pad is not so simple: SDL may hand us a /dev/hidraw path for
+    one, and gopher64 may open it as evdev instead. Those go the long way
+    round, through gopher64's own --assign-controller.
+    """
+    path = getattr(pad, "devpath", None)
+    return path if path and path.startswith("/dev/input/event") else None
 
 
 def find_gopher_config(app_id=None, exe=None):
@@ -1983,7 +2015,8 @@ def write_gopher_config(cfg_path, pads, app_id=None, exe=None):
     binding = (list(binding) + ["default"] * 4)[:4]
     enabled = (list(enabled) + [False] * 4)[:4]
 
-    used, ports, problems = set(), [], []
+    used, ports, problems, skipped = set(), [], [], []
+    unmatched, direct = [], []
     for pad in assigned:
         name = gopher_profile_name(pad.slot)
         profiles[name] = gopher_entry(pad, template)
@@ -1991,20 +2024,65 @@ def write_gopher_config(cfg_path, pads, app_id=None, exe=None):
         # Only ports we are filling: a port left enabled with nothing in it
         # is a controller the game waits for and nobody holds.
         enabled[pad.slot - 1] = True
+        # The path we already know beats an index into a listing that is
+        # re-made by every process that reads it: gopher64's enumeration
+        # order changed between two runs a minute apart, which is how port 4
+        # ended up with no device at all.
+        path = gopher_path_for(pad)
+        if path:
+            direct.append((pad, path))
+            print(f"gopher64: P{pad.slot} {pad.label} -> {path}", flush=True)
+            continue
         index = gopher_index_for(pad, names, used)
         if index is None:
-            problems.append(f"{pad.label}: gopher64 does not see this pad "
-                            f"(it lists {len(names)})")
+            # Not fatal unless it is P1. Four pads on the sofa and one of
+            # them unmatched used to refuse the launch outright, which left
+            # nobody playing rather than three people playing.
+            if pad.slot == 1:
+                problems.append(
+                    f"{pad.label}: gopher64 does not see P1's pad. It lists: "
+                    f"{', '.join(names) or 'nothing'}")
+            else:
+                print(f"gopher64: no match for P{pad.slot} {pad.label} "
+                      f"(tried {', '.join(gopher_names_for(pad))})", flush=True)
+                unmatched.append(pad)
             continue
         ports.append((pad, index))
+    # Whatever is left, by elimination. A pad only reveals what hardware it
+    # is once someone presses a button on it, so a pad nobody touched on the
+    # check screen has no name to match — but if the pads without a name and
+    # the entries without a pad come to the same number, there is only one
+    # way round they can go. "None" is gopher64's word for a device it could
+    # not name, and is never a pad.
+    spare = [i for i, name in enumerate(names)
+             if i not in used and name != "None"]
+    if unmatched and len(unmatched) == len(spare):
+        for pad, index in zip(unmatched, spare):
+            used.add(index)
+            ports.append((pad, index))
+            print(f"gopher64: P{pad.slot} {pad.label} -> controller "
+                  f"{index + 1} ({names[index]}) by elimination", flush=True)
+        unmatched = []
+    skipped.extend(unmatched)
+
     for slot in range(1, 5):
-        if not any(p.slot == slot for p in assigned):
+        if (not any(p.slot == slot for p in assigned)
+                or any(p.slot == slot for p in skipped)):
+            # A port with no device behind it is a controller the game waits
+            # for and nobody holds.
             enabled[slot - 1] = False
 
     if problems:
         return problems
     inp["input_profile_binding"] = binding
     inp["controller_enabled"] = enabled
+    assignment = (list(inp.get("controller_assignment") or [])
+                  + [None] * 4)[:4]
+    for pad, path in direct:
+        assignment[pad.slot - 1] = path
+    for pad in skipped:
+        assignment[pad.slot - 1] = None
+    inp["controller_assignment"] = assignment
     tmp = cfg_path + ".preflight.tmp"
     with open(tmp, "w") as fh:
         json.dump(data, fh, indent=2)
@@ -2025,11 +2103,23 @@ def write_gopher_config(cfg_path, pads, app_id=None, exe=None):
     got = (fresh.get("input") or {})
     if got.get("input_profile_binding") != binding:
         return ["gopher64 did not keep the profiles preflight wrote."]
-    missing = [p.slot for p, _ in ports
-               if not (got.get("controller_assignment") or [None] * 4)[p.slot - 1]]
+    # A port gopher64 would not record is disabled rather than fatal, unless
+    # it is P1's. Four pads and one missing device used to mean nobody played.
+    final = (got.get("controller_assignment") or [None] * 4)
+    missing = [p.slot for p, _ in ports if not final[p.slot - 1]]
+    if 1 in missing:
+        return ["gopher64 recorded no device for P1's controller."]
     if missing:
-        return [f"gopher64 recorded no device for port(s) "
-                f"{', '.join(str(s) for s in missing)}."]
+        print(f"gopher64: no device recorded for port(s) "
+              f"{', '.join(str(s) for s in missing)}; disabling them",
+              flush=True)
+        for slot in missing:
+            enabled[slot - 1] = False
+        fresh["input"]["controller_enabled"] = enabled
+        tmp = cfg_path + ".preflight.tmp"
+        with open(tmp, "w") as fh:
+            json.dump(fresh, fh, indent=2)
+        os.replace(tmp, cfg_path)
     return []
 
 
@@ -2187,6 +2277,11 @@ def cemu_profile(pad, uuid, gamepad):
             "\t\t<api>SDLController</api>\n"
             f"\t\t<uuid>{uuid}</uuid>\n"
             f"\t\t<display_name>{name}</display_name>\n"
+            # Rumble at full strength. Cemu's own default is 0 — off — and
+            # writing nothing left it there, so a pad this tool had just
+            # buzzed on the check screen sat silent in the game. It is a
+            # strength, not a flag: 1 is as hard as the pad goes.
+            "\t\t<rumble>1</rumble>\n"
             "\t\t<axis>\n\t\t\t<deadzone>0.25</deadzone>\n\t\t\t<range>1</range>\n\t\t</axis>\n"
             "\t\t<rotation>\n\t\t\t<deadzone>0.25</deadzone>\n\t\t\t<range>1</range>\n\t\t</rotation>\n"
             "\t\t<trigger>\n\t\t\t<deadzone>0.25</deadzone>\n\t\t\t<range>1</range>\n\t\t</trigger>\n"

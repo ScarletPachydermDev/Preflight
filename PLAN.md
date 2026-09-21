@@ -455,7 +455,29 @@ SDL code each control takes. Notes worth keeping:
   The bay corner carries a Kenney Wii U GamePad/Pro badge, with the ABXY swap
   badge under it.
 
-Untested so far: multiplayer on the TV, and the AppImage/portable paths.
+Four players confirmed on the TV 2026-09-21, after two failures worth
+recording:
+
+- **Its enumeration order is not stable.** Two runs a minute apart listed the
+  same pads in different orders, and since the listing and each assignment are
+  separate processes, an index taken from one was wrong in the next: port 4
+  silently got no device. Fixed by not using indices at all — preflight's own
+  SDL reports the same evdev node for a Steam virtual pad that gopher64's SDL3
+  opens (four pads at event20/22/24/26, matched by GUID), so the path is
+  written straight into the config. The CLI route survives only for a pad
+  whose path we cannot know, such as one SDL hands us as /dev/hidraw.
+- **A pad it could not name refused the whole launch.** Under Steam Input
+  every pad arrives here as "Steam Virtual Gamepad" while gopher64 lists the
+  hardware ("Google Stadia Controller"), so matching failed on three of four.
+  Names now include the paired hardware's own, and anything still unmatched
+  disables its port instead of stopping the game — unless it is P1's.
+
+**Rumble is not possible.** It is the Rumble Pak, chosen at runtime by holding
+the hotkey and pressing B, and gopher64 hard-codes MemPak at startup for every
+game but Chameleon Twist (`get_default_handler`). No config field, so nothing
+to write. Requested upstream.
+
+Untested so far: the AppImage and portable paths.
 
 Guessing was the old way and it does not survive a second Switch emulator:
 `find_app_id()` grepped `flatpak list` for "ryu", and no ROM path can say
