@@ -724,6 +724,25 @@ class RealWatcher:
         paths = {i["path"] for i in hits}
         return hits[-1] if len(paths) == 1 else None
 
+    def spare_devices(self, pads, sdl_pads):
+        """Real devices that no pad here accounts for.
+
+        A physical pad that SDL shows in its own right accounts for its own
+        node — it is not spare. What is left is hardware driving something
+        else: under Steam, a virtual pad.
+        """
+        taken = {p.real["path"] for p in pads if p.real}
+        seen = {(p.vendor, p.product) for p in sdl_pads
+                if (p.vendor, p.product) != STEAM_VIRTUAL}
+        out = []
+        for info in self.fds.values():
+            if info["path"] in taken:
+                continue
+            if (info["vendor"], info["product"]) in seen:
+                continue
+            out.append(info)
+        return out
+
     def unclaimed_nintendo(self, pads):
         """True when a Nintendo-lettered device is present but unpaired.
 
@@ -893,6 +912,32 @@ class RumbleCycle:
 
 def new_slot_state():
     return {"order": {}, "seq": 0, "present": set()}
+
+
+def pair_by_elimination(pads, reals):
+    """Identify a pad that cannot identify itself, when only one answer fits.
+
+    Pairing normally correlates a press on the virtual pad with a press on
+    the real device. That fails when the device's node is silent — a pad
+    Steam drives over hidraw, for instance — and it fails silently, leaving
+    the pad unidentified and its face buttons a guess.
+
+    But identity is sometimes deducible without any press at all: if exactly
+    one pad here is unidentified and exactly one real device is unaccounted
+    for, there is only one way round they can go. The same reasoning the
+    gopher64 backend uses for its ports, and the same caution: only when the
+    counts leave no choice. A Steam Controller is excluded from both sides,
+    having no node of its own to be matched with.
+    """
+    strangers = [p for p in pads
+                 if p.slot and p.real is None and not is_steam_controller(p)
+                 and (p.vendor, p.product) == STEAM_VIRTUAL]
+    if len(strangers) != 1:
+        return None
+    spare = reals.spare_devices(pads, pads)
+    if len(spare) != 1:
+        return None
+    return strangers[0], spare[0]
 
 
 def bind_real(pad, info, known, pads):
@@ -4610,7 +4655,11 @@ def main():
             # lettering, so it cannot tell whether Steam is relabelling it.
             # Measured the hard way — an 8bitdo nobody touched on this screen
             # went into the game with its face buttons the wrong way round.
+            # A Steam Controller is never in this list: it has no kernel
+            # node to be identified by, so warning about it would be a
+            # permanent alarm about something nobody can fix.
             strangers = [p for p in pads if p.slot and p.real is None
+                         and not is_steam_controller(p)
                          and (p.vendor, p.product) == STEAM_VIRTUAL]
             if strangers and reals.unclaimed_nintendo(pads):
                 warnings.append(
@@ -4625,6 +4674,16 @@ def main():
             if not pads:
                 warnings.append("No controllers detected. Wake one and it "
                                 "will appear here.")
+
+            deduced = pair_by_elimination(pads, reals)
+            if deduced:
+                pad_, info = deduced
+                print(f"pair: {pad_.display} must be {info['name']} "
+                      f"[{info['vendor']:04x}:{info['product']:04x}] — "
+                      f"nothing else is unaccounted for", flush=True)
+                bind_real(pad_, info, known, pads)
+                label_pads(pads)
+                log_layouts(pads)
 
             read_axes(sdl, pads, axes_logged)
             # No swap gesture on a map that cannot swap: a PlayStation pad's

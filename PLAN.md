@@ -360,6 +360,12 @@ a report of "button X does the wrong thing" has to start with the press log.
   invisible. It now re-scans once a second. Symptom to recognise: "pair: no
   device matched ... (0 recent event(s))" in the log while somebody is
   hammering that very pad.
+- **Identity by elimination.** A press cannot identify a pad whose node never
+  speaks, which is what an 8bitdo did until it was power-cycled — after which
+  Steam named its virtual pad "8BitDo SN30 Pro" and the name hints caught it
+  with no pairing at all. So when exactly one pad is unidentified and exactly
+  one real device is unaccounted for, they are matched without a press. Steam
+  Controllers are excluded from both sides: no node, nothing to match.
 - **An unpressed pad is not merely unnamed.** Identification is what says
   whether a pad wears Nintendo lettering, and that decides which way its
   face buttons are bound — an 8bitdo nobody touched on the check screen
