@@ -360,17 +360,17 @@ a report of "button X does the wrong thing" has to start with the press log.
   invisible. It now re-scans once a second. Symptom to recognise: "pair: no
   device matched ... (0 recent event(s))" in the log while somebody is
   hammering that very pad.
+- **Steam renames pads between runs.** The same Steam Controller arrived as
+  "Steam Controller" one run and "Microsoft X-Box 360 pad 0" the next, so any
+  check on its name is a coin toss: on a generic run it was matched to an
+  8bitdo's hardware and both pads came out swapped. What a pad IS is now
+  remembered against its id in known_pads.json.
 - **Identity by elimination.** A press cannot identify a pad whose node never
   speaks, which is what an 8bitdo did until it was power-cycled — after which
   Steam named its virtual pad "8BitDo SN30 Pro" and the name hints caught it
   with no pairing at all. So when exactly one pad is unidentified and exactly
   one real device is unaccounted for, they are matched without a press. Steam
   Controllers are excluded from both sides: no node, nothing to match.
-- **An unpressed pad is not merely unnamed.** Identification is what says
-  whether a pad wears Nintendo lettering, and that decides which way its
-  face buttons are bound — an 8bitdo nobody touched on the check screen
-  went into the game inverted (2026-09-21). The roster now says so when a
-  Nintendo-lettered device is present and unclaimed.
 - **Steam virtualises some pads even with Steam Input off for the game.**
   Measured the same day: an Xbox and a Stadia pad arrived as themselves
   while the 8bitdo still came through as a Steam virtual pad, because

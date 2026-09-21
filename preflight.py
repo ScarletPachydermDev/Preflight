@@ -89,7 +89,17 @@ def is_steam_controller(pad):
 
     It has no kernel device node, so it can never be paired to one — and a
     pairing is how every other virtual pad learns what hardware it is.
+
+    The name is not reliable on its own: Steam calls the same pad "Steam
+    Controller" on one run and "Microsoft X-Box 360 pad 0" on the next, and
+    on a run where it came through generic this check missed it and the pad
+    was matched to an 8bitdo's hardware — crossed labels, both pads swapped.
+    So the answer is REMEMBERED: once a pad has been seen under its proper
+    name, its identity is kept against the same id in known_pads.json and
+    used however Steam names it next time.
     """
+    if getattr(pad, "known_steam_controller", False):
+        return True
     for name in (getattr(pad, "gc_name", None), getattr(pad, "name", None)):
         if name and "steam controller" in name.lower():
             return True
@@ -823,6 +833,9 @@ def apply_known(pads, known):
     for p in pads:
         rec = known.get(p.store_key)
         if rec:
+            # Steam renames this pad between runs; the file remembers what it
+            # really is. See is_steam_controller.
+            p.known_steam_controller = bool(rec.get("steam_controller"))
             # Records without a schema marker predate friendly labels, and
             # their `nickname` was auto-filled with whatever SDL happened to
             # report that run — which would override the real label forever.
@@ -864,6 +877,10 @@ def remember(pads, known):
                 # controller Steam parks there next time.
                 "swap_faces": p.swap_faces if is_hardware_key(p.store_key) else False,
                 "swap_explicit": bool(getattr(p, "swap_explicit", False)),
+                # Kept because Steam does not name this pad the same way
+                # twice, and a pad it renames generically must still never
+                # be matched to somebody else's hardware.
+                "steam_controller": is_steam_controller(p),
                 "last_seen": time.strftime("%Y-%m-%dT%H:%M:%S"),
             }
     save_known(known)
@@ -4649,24 +4666,11 @@ def main():
                 warnings.append(f"Ryujinx's saved controller settings are "
                                 f"missing {len(binding_gaps)} binding(s) "
                                 f"({binding_gaps[0]}) — will be repaired.")
-            # A pad nobody has pressed has not been paired to its hardware,
-            # and an unpaired pad is one this tool cannot identify: it does
-            # not know whether the thing in someone's hands wears Nintendo
-            # lettering, so it cannot tell whether Steam is relabelling it.
-            # Measured the hard way — an 8bitdo nobody touched on this screen
-            # went into the game with its face buttons the wrong way round.
-            # A Steam Controller is never in this list: it has no kernel
-            # node to be identified by, so warning about it would be a
-            # permanent alarm about something nobody can fix.
-            strangers = [p for p in pads if p.slot and p.real is None
-                         and not is_steam_controller(p)
-                         and (p.vendor, p.product) == STEAM_VIRTUAL]
-            if strangers and reals.unclaimed_nintendo(pads):
-                warnings.append(
-                    f"Press a button on every pad: "
-                    f"{strangers[0].display} has not been identified yet, "
-                    f"and an unidentified pad can get its face buttons the "
-                    f"wrong way round.")
+            # There is deliberately no warning about an unidentified pad.
+            # It was added when identification needed a press, and it blinked
+            # — appearing and clearing as pads were matched — which is worse
+            # than useless on a screen someone is trying to read. Elimination
+            # now covers that case, and what it cannot cover is in the log.
 
             for name in unmapped:
                 warnings.append(f"{name}: SDL has no mapping for this pad, "
