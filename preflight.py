@@ -74,8 +74,13 @@ RING_BAD = (232, 162, 60)
 # Getting this from the silkscreen was wrong in exactly that case.
 NINTENDO_LAYOUT_HINTS = (
     "nintendo", "switch pro", "pro controller", "joy-con", "joycon",
-    "famicom", "super nintendo",
+    "famicom", "super nintendo", "8bitdo",
 )
+# Nintendo, and 8BitDo — whose pads wear Nintendo lettering whatever mode
+# they are in. Measured on an 8Bitdo SF30 Pro (2dc8:6101) in X-input mode:
+# Steam still fed its LABELLED A through as SDL's A, so the pad arrives
+# swapped and only the hardware behind it says so.
+NINTENDO_VENDORS = (0x057E, 0x2DC8)
 NINTENDO_VENDOR = 0x057E
 
 
@@ -87,7 +92,7 @@ def nintendo_layout(pad):
     """
     real = getattr(pad, "real", None) or {}
     vendor = real.get("vendor") if real else pad.vendor
-    if vendor == NINTENDO_VENDOR:
+    if vendor in NINTENDO_VENDORS:
         return True
     name = (real.get("name") if real else None) or pad.name or ""
     return any(h in name.lower() for h in NINTENDO_LAYOUT_HINTS)
@@ -1850,9 +1855,12 @@ DUCK_KEYS = {
 # Mirrored swaps the pairs, as on every other map here.
 DUCK_FACE_IDENTITY = {"cross": "A", "circle": "B", "square": "X",
                       "triangle": "Y"}
-# There is no mirrored twin here, unlike every other backend: north is
-# triangle and south is cross on every pad, so the swap gesture has nothing
-# to act on.
+# The twin for a Nintendo-lettered pad. Not a user setting and not a swap
+# gesture: SDL's letters are labels on such a pad, so "A" is the east button
+# and the shapes have to be bound the other way round to land where the
+# player's thumb expects. Measured on an 8Bitdo SF30 Pro through Steam Input.
+DUCK_FACE_NINTENDO = {"cross": "B", "circle": "A", "square": "Y",
+                      "triangle": "X"}
 
 # Two ports, and a multitap on port 1 makes four. The pads are not numbered
 # consecutively when it is on: port 0 takes slots 0-3 as pads 0, 2, 3, 4
@@ -1970,8 +1978,11 @@ def find_duck_config(exe=None):
 
 def duck_pad_rows(pad, player):
     """One [PadN] section: a DualShock wired to this pad."""
-    # Never mirrored: a shape is a position, not a label (see PS_FACES).
-    buttons = dict(DUCK_BUTTON, **DUCK_FACE_IDENTITY)
+    # By position, which on a Nintendo-lettered pad means the other way
+    # round from SDL's letters — see DUCK_FACE_NINTENDO.
+    face = (DUCK_FACE_NINTENDO if nintendo_layout(pad)
+            else DUCK_FACE_IDENTITY)
+    buttons = dict(DUCK_BUTTON, **face)
     rows = [("Type", "AnalogController")]
     for role, key in DUCK_KEYS.items():
         if role in buttons:
@@ -3391,12 +3402,16 @@ def _switch_controls(g, held, axes, swap, holds, wys):
 # triggers outermost, the shoulders inboard of them, Select and Start in the
 # middle, and the four shapes in a diamond.
 #
-# This map has NO swap, and cannot need one. The other maps swap because a
-# letter can lie: the button marked A is in different places on a Switch pad
-# and an Xbox pad. A shape is not a label, it is a position — north is
-# triangle, south cross, east circle, west square, on every pad ever made —
-# so there is nothing to mirror. Each shape is lit by the SDL button in its
-# own position, which is the same rule the bindings are written with.
+# This map has no swap GESTURE — a shape is a position, north is triangle on
+# every pad ever made, so there is nothing for a player to choose. But it
+# still has to be compensated, because SDL's letters are not always
+# positions: on a Nintendo-lettered pad, SDL's A is the button MARKED A,
+# which sits east. Measured on an 8Bitdo SF30 Pro through Steam Input:
+# pressing the bottom button lit circle and pressing east lit cross.
+#
+# So the shapes are drawn and bound against the pad's own hardware layout,
+# automatically and invisibly — nintendo_layout(), the same fact the other
+# maps use for their default. Nobody is asked, and nothing is toggled.
 PS_CAPTION = 1.5
 
 PS_FACES = (("A", "cross", 0, 1), ("B", "circle", 1, 0),
@@ -3422,7 +3437,7 @@ def _playstation_controls(g, held, axes, swap, holds, wys):
 
     dpad_arms(g, lay.centres[0], lay.row_y, lay.dside, held)
 
-    live = face_live(held, False)      # never swapped; see PS_FACES above
+    live = face_live(held, swap)       # hardware layout, not a choice
     for letter, name, dx, dy in PS_FACES:
         g.face(name, lay.centres[3] + dx * lay.fspread,
                lay.row_y + dy * lay.fspread, lay.fside,
@@ -4056,7 +4071,8 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
             # the corner reads as one column of facts about the pad.
             corner = cx + cw - int(ch * 0.06) - bw / 2
             swap_y = cy + int(ch * 0.13) + bh / 2 + ch * 0.04 + ch * 0.075
-        # The swap badge means nothing on a map that cannot swap.
+        # The swap badge means nothing on a map with no swap gesture: what
+        # it would show there is the hardware, not a setting.
         if pad and pad.swap_faces and layout != "playstation":
             # Badged in the corner rather than on the pad itself — there is no
             # room among the buttons, and a non-default mapping deserves to be
@@ -4078,7 +4094,12 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
         card_bg = blend(BG, col, 0.30 if buzzing else 0.10)
         draw_gamepad(ui, cx + (cw - pw) / 2, cy + ch * top, pw, ph, col,
                      pad.held if pad else set(), pad.axes if pad else {},
-                     card_bg, swap=pad.swap_faces if pad else False,
+                     card_bg,
+                     # The PlayStation map takes the pad's hardware layout
+                     # rather than its swap setting: shapes are positions,
+                     # and a Nintendo-lettered pad reports labels.
+                     swap=((nintendo_layout(pad) if layout == "playstation"
+                            else pad.swap_faces) if pad else False),
                      dim=pad is None,
                      holds=holds.get(pad.key) if pad else None,
                      wys=pad_wysiwyg(pad) if pad else None,

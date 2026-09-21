@@ -433,7 +433,16 @@ The check screen draws a PlayStation map from Kenney's own PS set, with the
 a smudge at this size) and Select/Start keeping their captions, since the
 shapes alone — a box and a wedge — say nothing.
 
-**This map has no swap, and the gesture is disabled on it.** Every other map
+**Shapes are positions, but SDL's letters are not.** Measured on an 8Bitdo
+SF30 Pro in X-input mode, through Steam Input (2026-09-21): pressing the
+BOTTOM button lit circle and pressing east lit cross. Steam feeds a
+Nintendo-lettered pad's labelled A through as SDL's A, so the pad arrives
+already swapped and nothing downstream can see it. The map and the bindings
+therefore compensate from the pad's own hardware — `nintendo_layout()`, which
+now knows 8BitDo's vendor (0x2dc8) as well as Nintendo's — automatically,
+with nothing for the player to set.
+
+**The swap GESTURE is disabled on this map.** Every other map
 swaps because a LETTER can lie about position: the button marked A is in
 different places on a Switch pad and an Xbox pad. A shape cannot lie — north
 is triangle, south cross, east circle, west square, on every pad — so the
