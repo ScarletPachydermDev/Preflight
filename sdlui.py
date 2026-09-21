@@ -291,6 +291,12 @@ def _bind(sdl, ttf):
     sdl.SDL_JoystickInstanceID.argtypes, sdl.SDL_JoystickInstanceID.restype = [vp], ci
     sdl.SDL_JoystickCurrentPowerLevel.argtypes = [vp]
     sdl.SDL_JoystickCurrentPowerLevel.restype = ci
+    # SDL's own player index, which is what DuckStation names a pad by.
+    # Same concept in SDL2 and SDL3, so a number read here is the number the
+    # emulator writes — unlike a joystick index, which each process renumbers.
+    for name in ("SDL_JoystickGetDevicePlayerIndex",):
+        if hasattr(sdl, name):
+            getattr(sdl, name).argtypes, getattr(sdl, name).restype = [ci], ci
 
     sdl.SDL_CreateRGBSurfaceFrom.argtypes = [vp, ci, ci, ci, ci,
                                              ctypes.c_uint32, ctypes.c_uint32,

@@ -404,6 +404,33 @@ ever. Only the empty case is filled; a host the user set is left alone.
 SelfSteam writes the same two values when it creates a Ryubing shortcut, so
 the two now agree instead of overwriting each other at every launch.
 
+**DuckStation, as of 2026-09-21.** Read out of its own source
+(`src/util/sdl_input_source.cpp`, `src/core/analog_controller.cpp`,
+`src/core/controller.cpp`) plus a settings.ini it wrote. Plain INI, one
+`[PadN]` section per player, `Type = AnalogController`, one line per control.
+
+- A binding is `SDL-<player index>/<name>`, and the index is SDL's **player**
+  index, not a device index — the same concept in SDL2 and SDL3, so unlike
+  gopher64 there is a stable number to write. It is read through
+  DuckStation's OWN SDL3, extracted from the AppImage by the cache that
+  already exists for Ryubing, and pads are matched to it by GUID.
+- Button names are SDL's Xbox-style ones (`A`, `LeftShoulder`, `DPadUp`)
+  whatever pad is held; the Cross/Circle/Square/Triangle names in that file
+  are for display only. Axes carry a direction: `+LeftX`, `-LeftY`,
+  `+LeftTrigger`, or `Full` for the whole throw. Motors are
+  `LargeMotor`/`SmallMotor`, and both are bound, so a DualShock rumbles.
+- **Four players work, through the multitap.** `MultitapMode = Port1Only` is
+  written as soon as three pads are claimed. The sections are then NOT
+  consecutive: port 1's slots are pads 0, 2, 3, 4 in its own numbering
+  (`Controller::PortDisplayOrder`), so four players land in Pad1, Pad3, Pad4
+  and Pad5. Ports we do not fill are set to `Type = None`, or a stale
+  binding leaves a phantom player.
+- Face mapping is by POSITION, which is what the shapes are: Cross is the
+  bottom button and so is SDL's A.
+
+Still to do: the check screen draws the Switch map, so it labels the face
+buttons A/B/X/Y. Kenney's pack has a PlayStation section for a real one.
+
 **gopher64, as of 2026-09-20.** Built from its own source (`src/ui/`) and a
 config it wrote: `config.json` keeps named input profiles, each an array of 19
 slots in `input_profile.rs`'s order, every slot a [keyboard, controller] pair.

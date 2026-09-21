@@ -460,6 +460,10 @@ class Pad:
                 s = sdl.SDL_GameControllerGetSerial(self.handle)
                 self.serial = s.decode(errors="replace") if s else None
 
+        self.player_index = -1
+        if hasattr(sdl, "SDL_JoystickGetDevicePlayerIndex"):
+            self.player_index = sdl.SDL_JoystickGetDevicePlayerIndex(index)
+
         devpath = None
         if hasattr(sdl, "SDL_JoystickPathForIndex"):
             p = sdl.SDL_JoystickPathForIndex(index)
@@ -1087,6 +1091,7 @@ BACKENDS = {
     "eden": ("eden",),
     "cemu": ("cemu",),
     "gopher64": ("gopher",),
+    "duckstation": ("duckstation",),
 }
 
 
@@ -1803,6 +1808,255 @@ def write_eden_config(cfg_path, pads, sdl):
             BACKUP_DIR, f"qt-config.{time.strftime('%Y%m%d-%H%M%S')}.ini"))
     if not set_ini_keys(cfg_path, "Controls", values):
         return ["could not write the [Controls] section of qt-config.ini"]
+    return []
+
+
+# ---------------------------------------------------------------- duckstation
+
+# Read out of DuckStation's own source (src/util/sdl_input_source.cpp,
+# src/core/analog_controller.cpp, src/core/controller.cpp), not guessed.
+#
+# A binding is "SDL-<player index>/<name>". Buttons carry SDL's Xbox-style
+# names whatever pad is held — the PlayStation names in that file are for
+# display only — and an axis carries a direction: "+" or "-" for half of it,
+# "Full" for the whole throw.
+DUCK_BUTTON = {"cross": "A", "circle": "B", "square": "X", "triangle": "Y",
+               "select": "Back", "start": "Start",
+               "l1": "LeftShoulder", "r1": "RightShoulder",
+               "l3": "LeftStick", "r3": "RightStick",
+               "up": "DPadUp", "down": "DPadDown",
+               "left": "DPadLeft", "right": "DPadRight"}
+DUCK_AXIS = {"l2": "+LeftTrigger", "r2": "+RightTrigger",
+             "lleft": "-LeftX", "lright": "+LeftX",
+             "lup": "-LeftY", "ldown": "+LeftY",
+             "rleft": "-RightX", "rright": "+RightX",
+             "rup": "-RightY", "rdown": "+RightY"}
+# Both motors, so a DualShock rumbles. Same reasoning as everywhere else
+# here: a pad that buzzed on the check screen should buzz in the game.
+DUCK_MOTOR = {"largemotor": "LargeMotor", "smallmotor": "SmallMotor"}
+# The INI's own spelling for each, in the order DuckStation writes them.
+DUCK_KEYS = {
+    "up": "Up", "down": "Down", "left": "Left", "right": "Right",
+    "cross": "Cross", "circle": "Circle", "square": "Square",
+    "triangle": "Triangle", "select": "Select", "start": "Start",
+    "l1": "L1", "r1": "R1", "l2": "L2", "r2": "R2",
+    "l3": "L3", "r3": "R3",
+    "lup": "LUp", "ldown": "LDown", "lleft": "LLeft", "lright": "LRight",
+    "rup": "RUp", "rdown": "RDown", "rleft": "RLeft", "rright": "RRight",
+    "largemotor": "LargeMotor", "smallmotor": "SmallMotor",
+}
+# What-you-see-is-what-you-get by POSITION, which is what a PlayStation pad's
+# shapes are: Cross is the bottom button and SDL's A is the bottom button.
+# Mirrored swaps the pairs, as on every other map here.
+DUCK_FACE_IDENTITY = {"cross": "A", "circle": "B", "square": "X",
+                      "triangle": "Y"}
+DUCK_FACE_MIRRORED = {"cross": "B", "circle": "A", "square": "Y",
+                      "triangle": "X"}
+
+# Two ports, and a multitap on port 1 makes four. The pads are not numbered
+# consecutively when it is on: port 0 takes slots 0-3 as pads 0, 2, 3, 4
+# (Controller::PortDisplayOrder), so four players land in Pad1, Pad3, Pad4,
+# Pad5. Getting this wrong is silent — the sections exist either way.
+DUCK_PADS_PLAIN = (1, 2)
+DUCK_PADS_MULTITAP = (1, 3, 4, 5)
+
+
+def duck_sections(count):
+    """(section numbers, multitap mode) for this many players."""
+    if count > 2:
+        return DUCK_PADS_MULTITAP[:count], "Port1Only"
+    return DUCK_PADS_PLAIN[:count], "Disabled"
+
+
+# DuckStation names a pad by SDL's PLAYER index, so this asks its own SDL3
+# what those are rather than trusting ours: same idea as EMU_ENUM, and the
+# reason ids computed with the wrong SDL match nothing (§3).
+DUCK_ENUM = r"""
+import ctypes, sys
+sdl = ctypes.CDLL(sys.argv[1])
+class G(ctypes.Structure):
+    _fields_ = [("d", ctypes.c_uint8 * 16)]
+sdl.SDL_SetHint(b"SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", b"1")
+sdl.SDL_Init(0x00000200 | 0x00002000)
+sdl.SDL_GetJoysticks.restype = ctypes.POINTER(ctypes.c_uint32)
+sdl.SDL_GetJoysticks.argtypes = [ctypes.POINTER(ctypes.c_int)]
+sdl.SDL_GetJoystickGUIDForID.restype = G
+sdl.SDL_GetJoystickGUIDForID.argtypes = [ctypes.c_uint32]
+sdl.SDL_GUIDToString.argtypes = [G, ctypes.c_char_p, ctypes.c_int]
+sdl.SDL_GetJoystickPlayerIndexForID.restype = ctypes.c_int
+sdl.SDL_GetJoystickPlayerIndexForID.argtypes = [ctypes.c_uint32]
+sdl.SDL_GetJoystickNameForID.restype = ctypes.c_char_p
+sdl.SDL_GetJoystickNameForID.argtypes = [ctypes.c_uint32]
+sdl.SDL_free.argtypes = [ctypes.c_void_p]
+count = ctypes.c_int(0)
+ids = sdl.SDL_GetJoysticks(ctypes.byref(count))
+for i in range(count.value if ids else 0):
+    b = ctypes.create_string_buffer(33)
+    sdl.SDL_GUIDToString(sdl.SDL_GetJoystickGUIDForID(ids[i]), b, 33)
+    n = sdl.SDL_GetJoystickNameForID(ids[i])
+    print(sdl.SDL_GetJoystickPlayerIndexForID(ids[i]), b.value.decode(),
+          (n or b"?").decode(errors="replace"), sep="\t")
+if ids:
+    sdl.SDL_free(ids)
+sdl.SDL_Quit()
+"""
+
+
+def duck_players(exe=None):
+    """[(player index, guid, name)] as DuckStation's own SDL3 sees them."""
+    lib = find_emulator_sdl3(exe)
+    if not lib:
+        return None
+    env = dict(os.environ,
+               SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD="1")
+    try:
+        out = subprocess.run([sys.executable, "-c", DUCK_ENUM, lib], env=env,
+                             capture_output=True, text=True, timeout=30)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    rows = []
+    for line in out.stdout.splitlines():
+        bits = line.split("\t")
+        if len(bits) == 3 and bits[0].lstrip("-").isdigit():
+            rows.append((int(bits[0]), bits[1], bits[2]))
+    return rows or None
+
+
+def duck_player_for(pad, rows, used):
+    """Which SDL player index this pad is, as DuckStation will number it.
+
+    Matched on the GUID its own SDL reports, then on vendor/product with the
+    name-CRC, which survive the version difference the bus byte does not.
+    Falls back to the player index our own SDL gave us.
+    """
+    for exact in (True, False):
+        for player, guid, _name in rows or ():
+            if player < 0 or player in used:
+                continue
+            if exact and guid != pad.sdl_guid:
+                continue
+            if not exact and (guid_vendor_product(guid)
+                              != (pad.vendor, pad.product)
+                              or guid_name_crc(guid) != pad.name_crc):
+                continue
+            used.add(player)
+            return player
+    fallback = getattr(pad, "player_index", -1)
+    if fallback >= 0 and fallback not in used:
+        used.add(fallback)
+        return fallback
+    return None
+
+
+DUCK_DATA_DIRS = ("~/.local/share/duckstation",)
+
+
+def find_duck_config(exe=None):
+    """settings.ini, in a portable folder beside the AppImage or in the
+    user's data directory. Never one standing in for the other."""
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        if os.path.isfile(os.path.join(base, "portable.txt")):
+            return os.path.join(base, "settings.ini")
+    for d in DUCK_DATA_DIRS:
+        path = os.path.join(os.path.expanduser(d), "settings.ini")
+        if os.path.isfile(path):
+            return path
+    return os.path.join(os.path.expanduser(DUCK_DATA_DIRS[0]), "settings.ini")
+
+
+def duck_pad_rows(pad, player):
+    """One [PadN] section: a DualShock wired to this pad."""
+    face = DUCK_FACE_MIRRORED if pad.swap_faces else DUCK_FACE_IDENTITY
+    buttons = dict(DUCK_BUTTON, **face)
+    rows = [("Type", "AnalogController")]
+    for role, key in DUCK_KEYS.items():
+        if role in buttons:
+            rows.append((key, f"SDL-{player}/{buttons[role]}"))
+        elif role in DUCK_AXIS:
+            rows.append((key, f"SDL-{player}/{DUCK_AXIS[role]}"))
+        elif role in DUCK_MOTOR:
+            rows.append((key, f"SDL-{player}/{DUCK_MOTOR[role]}"))
+    return rows
+
+
+def write_duck_config(cfg_path, pads, exe=None):
+    """Write a DualShock per assigned pad, and turn the multitap on when
+    there are more than two of them.
+
+    Every [PadN] section is replaced wholesale, and any pad section we do not
+    fill is emptied to Type = None: a port left bound to yesterday's pad is a
+    second player nobody is holding.
+    """
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)
+    if not assigned:
+        return ["no controllers assigned"]
+    if not os.path.isfile(cfg_path):
+        return ["DuckStation's settings.ini was not found — run it once first."]
+    sections = read_ini(cfg_path)
+    if sections is None:
+        return ["cannot read settings.ini"]
+
+    rows = duck_players(exe)
+    if rows is None:
+        print("duckstation: could not read its own SDL; using ours", flush=True)
+    numbers, multitap = duck_sections(len(assigned))
+
+    used, ours, problems = set(), {}, []
+    for pad, number in zip(assigned, numbers):
+        player = duck_player_for(pad, rows, used)
+        if player is None:
+            problems.append(f"{pad.label}: no SDL player index for this pad")
+            continue
+        ours[f"Pad{number}"] = duck_pad_rows(pad, player)
+        print(f"duckstation: P{pad.slot} {pad.label} -> Pad{number} "
+              f"= SDL-{player}", flush=True)
+    if problems:
+        return problems
+
+    # Ports we are not filling, emptied rather than left as they were.
+    for number in (DUCK_PADS_MULTITAP + DUCK_PADS_PLAIN):
+        name = f"Pad{number}"
+        if name not in ours:
+            ours[name] = [("Type", "None")]
+
+    wanted = {"InputSources": {"SDL": "true"},
+              "ControllerPorts": {"MultitapMode": multitap}}
+
+    out, seen = [], set()
+    for name, existing in sections:
+        if name in ours:
+            out.append((name, ours[name]))
+            seen.add(name)
+            continue
+        if name in wanted:
+            rows_out = list(existing)
+            for key, value in wanted[name].items():
+                for i, (k, _v) in enumerate(rows_out):
+                    if k == key:
+                        rows_out[i] = (k, value)
+                        break
+                else:
+                    rows_out.append((key, value))
+            out.append((name, rows_out))
+            seen.add(name)
+            continue
+        out.append((name, existing))
+    for name in wanted:
+        if name not in seen:
+            out.append((name, list(wanted[name].items())))
+    for number in DUCK_PADS_MULTITAP + DUCK_PADS_PLAIN:
+        name = f"Pad{number}"
+        if name not in seen:
+            out.append((name, ours[name]))
+            seen.add(name)
+
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"settings.{stamp}.ini"))
+    write_ini(cfg_path, out)
     return []
 
 
@@ -3960,6 +4214,9 @@ BACKEND_ENV = {
     # gopher64 links SDL3 statically, which hides the virtual pads just the
     # same; its own CLI is given the hint the same way (gopher_run).
     "gopher64": (VIRTUAL_PAD_HINT,),
+    # An AppImage inherits our environment, but the hint costs nothing and
+    # the day it ships as a flatpak this is the line that saves an evening.
+    "duckstation": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -4071,6 +4328,8 @@ def main():
         cfg_path = cemu_config_target(app_id, exe)
     elif backend == "gopher64":
         cfg_path = find_gopher_config(app_id, exe)
+    elif backend == "duckstation":
+        cfg_path = find_duck_config(exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -4317,6 +4576,8 @@ def main():
                 problems = write_cemu_config(cfg_path, pads, p1_pro)
             elif backend == "gopher64":
                 problems = write_gopher_config(cfg_path, pads, app_id, exe)
+            elif backend == "duckstation":
+                problems = write_duck_config(cfg_path, pads, exe)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:
