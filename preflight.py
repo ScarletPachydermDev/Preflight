@@ -84,6 +84,18 @@ NINTENDO_VENDORS = (0x057E, 0x2DC8)
 NINTENDO_VENDOR = 0x057E
 
 
+def is_steam_controller(pad):
+    """A Steam Controller, which Steam holds at hidraw level.
+
+    It has no kernel device node, so it can never be paired to one — and a
+    pairing is how every other virtual pad learns what hardware it is.
+    """
+    for name in (getattr(pad, "gc_name", None), getattr(pad, "name", None)):
+        if name and "steam controller" in name.lower():
+            return True
+    return False
+
+
 def nintendo_layout(pad):
     """True when this pad's A and B are the other way round from SDL's.
 
@@ -4453,6 +4465,7 @@ def main():
     # log with the one thing it already proved.
     presses_logged = [0]
     axes_logged = set()
+    last_press = {}         # pad key -> tick, for the pairing guard above
 
     def rescan():
         """Rebuild the pad list, preserving what each pad was doing."""
@@ -4586,11 +4599,27 @@ def main():
 
                 # Same press lands on the hidden physical pad too; pairing
                 # them is what turns "Steam pad f679" into a real controller.
-                if pad.real is None and (pad.vendor, pad.product) == STEAM_VIRTUAL:
+                #
+                # Two guards, both bought the hard way. A Steam Controller
+                # never gets one: Steam holds it at hidraw level, so it has
+                # no kernel node at all and anything it paired with would be
+                # somebody else's pad — it took an 8bitdo's, wore its name,
+                # and inherited its button layout with it.
+                #
+                # And nobody pairs while another pad is also being pressed:
+                # a node that fired 200ms ago belongs to whoever pressed it,
+                # not to the next pad to ask. Waiting for a quiet press costs
+                # a second and cannot mis-pair.
+                quiet = all(t is None or now - t > reals.WINDOW_MS
+                            for k, t in last_press.items() if k != pad.key)
+                if (pad.real is None and not is_steam_controller(pad)
+                        and quiet
+                        and (pad.vendor, pad.product) == STEAM_VIRTUAL):
                     taken = {q.real["path"] for q in pads if q.real}
                     hit = reals.claim(now, taken)
                     if hit:
                         bind_real(pad, hit, known, pads)
+                last_press[pad.key] = now
 
                 if state == "error":
                     if btn == BTN_B:

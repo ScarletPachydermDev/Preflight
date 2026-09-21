@@ -345,7 +345,12 @@ a report of "button X does the wrong thing" has to start with the press log.
 - **`input_config` is replaced wholesale.** A controller asleep during
   preflight gets no Ryujinx binding at all.
 - **A pad shows `Steam pad xxxx` until someone touches it.** The hardware
-  pairing needs a press.
+  pairing needs a press — and a QUIET one: pairing is skipped while another
+  pad is being pressed, since a node that fired 200ms ago belongs to whoever
+  pressed it rather than to the next pad to ask. A Steam Controller never
+  pairs at all: Steam holds it at hidraw level, so it has no kernel node, and
+  left to itself it took an 8bitdo's (2026-09-21), wore its name and
+  inherited its Nintendo button layout with it.
 - **Steam Input's off switch is per-pad, not per-game.** Measured 2026-09-21:
   with Steam Input disabled for a shortcut, other pads arrive as themselves —
   their own Bluetooth GUIDs reach the config — while the Steam Controller
