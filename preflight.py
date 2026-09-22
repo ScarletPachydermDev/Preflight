@@ -4801,7 +4801,12 @@ def update_gc_holds(pads, holding, now):
         start = BTN_START in pad.held
         shoulder = BTN_LSHOULDER in pad.held or BTN_RSHOULDER in pad.held
         # Quit is every pad's, as everywhere else; starting is P1's alone.
-        wanted = {BTN_BACK: (start and shoulder) or BTN_BACK in pad.held,
+        # The bare Back clause is dropped for a pad that IS an N64
+        # controller. Steam's stand-in maps its C up onto Back, so holding
+        # C started counting down to quit — on the one map where Back is
+        # not a button the player has. Z and Start still quit.
+        back_quits = BTN_BACK in pad.held and not native_n64(pad)
+        wanted = {BTN_BACK: (start and shoulder) or back_quits,
                   BTN_START: start and not shoulder and pad.slot == 1}
         for btn, want in wanted.items():
             if want:
