@@ -4655,7 +4655,12 @@ def main():
     result = None
     cycle = RumbleCycle(sdl)
     reals = RealWatcher()
-    if not reals.open():
+    if reals.open():
+        for _info in sorted(reals.fds.values(), key=lambda i: i["path"]):
+            print(f"watch: {_info['path']} {_info['name']} "
+                  f"[{_info['vendor']:04x}:{_info['product']:04x}] "
+                  f"{'hidraw' if _info.get('hid') else 'evdev'}", flush=True)
+    if not reals.available:
         print("note: no physical pads visible yet; will look again as pads "
               "wake", flush=True)
     HOLD_MS = 1100
@@ -4862,6 +4867,16 @@ def main():
                     hit = reals.claim(now, taken)
                     if hit:
                         bind_real(pad, hit, known, pads)
+                        label_pads(pads)
+                        # A successful match used to log nothing, which made
+                        # a wrong one invisible: the only trace was another
+                        # pad reporting "already claimed" against a device
+                        # it could not name.
+                        print(f"pair: P{pad.slot or '-'} is {hit['name']} "
+                              f"[{hit['vendor']:04x}:{hit['product']:04x}] "
+                              f"via {'hidraw' if hit.get('hid') else 'evdev'}"
+                              f" — Steam calls it '{pad.gc_name or pad.name}'",
+                              flush=True)
                     if not hit and pairing_logged[0] < 12:
                         # Say when a press went by without identifying the
                         # pad: silence here reads as "nothing to see", and
