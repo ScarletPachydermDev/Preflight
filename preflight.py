@@ -2577,6 +2577,7 @@ def find_gopher_config(app_id=None, exe=None):
 def gopher_entry(pad, template):
     """One input profile for this pad: gopher64's own keyboard half kept,
     the controller half written from scratch."""
+    learned = (load_pad_map(pad) or {}).get("learned") or {}
     if native_n64(pad):
         # Only if the player asked. swap_faces defaults to true here —
         # nintendo_layout reads vendor 057E and is right that the pad is
@@ -2589,6 +2590,15 @@ def gopher_entry(pad, template):
                  else GOPHER_NATIVE_N64)
     else:
         table = GOPHER_MIRRORED if pad.swap_faces else GOPHER_IDENTITY
+    # Anything the player taught preflight on the mapping screen overrides
+    # the table, for the same reason it overrides it on the screen: it was
+    # measured on this controller rather than assumed about its kind.
+    table = dict(table)
+    for role, got in learned.items():
+        if role not in table or not got:
+            continue
+        table[role] = (_button(got[1]) if got[0] == "button"
+                       else _axis(got[1], got[2]))
     rows = []
     for i, role in enumerate(GOPHER_SLOTS):
         pair = None
@@ -3585,7 +3595,7 @@ class Bay:
 
 def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
                  dim=False, holds=None, wys=None, layout="switch",
-                 native=False):
+                 src=None):
     """A button map — no controller body.
 
     Drawing a shape means picking *a* shape, and every real pad is a different
@@ -3614,7 +3624,7 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
                 "playstation": _playstation_controls}.get(
                     layout, _switch_controls)
     if controls is _n64_controls:
-        controls(g, held, axes, swap, holds or {}, wys, native)
+        controls(g, held, axes, swap, holds or {}, wys, src)
     else:
         controls(g, held, axes, swap, holds or {}, wys)
 
@@ -3993,10 +4003,34 @@ N64_C_NATIVE = {"c_up": ("b", 3), "c_left": ("b", 2), "c_right": ("b", 4),
                 "c_down": ("a", 5)}
 # Z is the LEFT trigger on that pad, not the right one.
 N64_Z_AXIS_NATIVE = 4
+
+
+def n64_sources(pad):
+    """Where this pad's C buttons and Z actually are, best answer first.
+
+    A map the player taught us wins over every table: it was measured on the
+    controller in their hands, one control at a time. Then the native table
+    for a pad known to be an N64 controller, then the stand-in assumption —
+    C on the right stick, Z on the right trigger — which is right for the
+    modern pads almost everyone uses.
+    """
+    out = {"z": ("a", 5, 1)}
+    for name, (axis, sign) in N64_C_AXES.items():
+        out[name] = ("a", axis, sign)
+    if pad is not None and native_n64(pad):
+        out["z"] = ("a", N64_Z_AXIS_NATIVE, 1)
+        for name, (kind, num) in N64_C_NATIVE.items():
+            out[name] = ("b", num) if kind == "b" else ("a", num, 1)
+    rec = load_pad_map(pad) if pad is not None else None
+    for name, got in ((rec or {}).get("learned", {})).items():
+        if name in out and got:
+            out[name] = (("b", got[1]) if got[0] == "button"
+                         else ("a", got[1], got[2]))
+    return out
 N64_C_DEADZONE = 12000
 
 
-def _n64_controls(g, held, axes, swap, holds, wys, native=False):
+def _n64_controls(g, held, axes, swap, holds, wys, src=None):
     """What an N64 pad has, in the places the other maps put their own.
 
     Three things are the pad's own. There is one analog stick, so the second
@@ -4016,7 +4050,7 @@ def _n64_controls(g, held, axes, swap, holds, wys, native=False):
     draw_top_row(g, lay, (
         Control(-(lay.TRIGGER + N64_Z_OUT), "z",
                 S(0.31 * N64_TOP * N64_Z),
-                axis=N64_Z_AXIS_NATIVE if native else 5),
+                axis=(src or {}).get("z", ("a", 5, 1))[1]),
         Control(-lay.SHOULDER, "l", S(0.31 * N64_TOP), (BTN_LSHOULDER,)),
         Control(lay.SHOULDER, "r", S(0.31 * N64_TOP), (BTN_RSHOULDER,)),
         # Start sits lower than the rest of the row: the hold ring is drawn
@@ -4051,13 +4085,11 @@ def _n64_controls(g, held, axes, swap, holds, wys, native=False):
             g.face(name, cx, cy, w, h, pressed=letter in live, wys=wys)
             continue
         down = False
-        if native and name in N64_C_NATIVE:
-            kind, num = N64_C_NATIVE[name]
-            down = (num in held if kind == "b"
-                    else axes.get(num, 0) > N64_C_DEADZONE)
-        elif name in N64_C_AXES:
-            axis, sign = N64_C_AXES[name]
-            down = axes.get(axis, 0) * sign > N64_C_DEADZONE
+        where = (src or {}).get(name)
+        if where and where[0] == "b":
+            down = where[1] in held
+        elif where:
+            down = axes.get(where[1], 0) * where[2] > N64_C_DEADZONE
         g.glyph(name, cx, cy, w, h, active=down)
 
 
@@ -4474,9 +4506,9 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
                      holds=holds.get(pad.key) if pad else None,
                      wys=pad_wysiwyg(pad) if pad else None,
                      layout=layout,
-                     # A controller that IS an N64 pad puts its C buttons
-                     # and its Z somewhere a stand-in never does.
-                     native=bool(pad) and native_n64(pad))
+                     # Where this pad's C and Z really are — taught,
+                     # known, or assumed, in that order.
+                     src=n64_sources(pad) if layout == "n64" else None)
 
         if pad:
             label, lc = pad.label, FG
@@ -4513,6 +4545,11 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
              "swap A/B" if layout == "n64" else "swap ABXY"),
             ([z_art, "sep+", start_art], "P1", p1c, "hold to quit"),
         ]
+        if layout == "n64":
+            # Only where it is offered, and worth a line: a controller that
+            # really is an N64 pad has buttons no table can place for it.
+            items.append((["sepL", "sep+", "sepR"], None, anyone,
+                          "hold to map this pad"))
     elif layout == "playstation":
         # No swap entry: the shapes are positions, and which SDL letter
         # sits on each one is settled by the pad's own vendor id once it
@@ -4536,6 +4573,92 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
                              "is a Wii U Pro Controller" if wiiu == "pro"
                              else "is a Wii U GamePad"))
     glyph_bar(ui, items, hidden={1} if p1_claimed else ())
+
+
+# ------------------------------------------------------------------ mapping
+
+# The N64 controls, in the order the mapping screen asks for them, with the
+# synthetic input that lights each one on the ordinary map. Drawing the real
+# map with a faked press is what makes the highlight travel round the pad
+# without preflight needing to know yet how this controller is wired — which
+# is the whole point of asking.
+MAP_STEPS_N64 = [
+    ("a", "A", {"held": {BTN_A}}),
+    ("b", "B", {"held": {BTN_B}}),
+    ("c_up", "C up", {"axes": {3: -32767}}),
+    ("c_down", "C down", {"axes": {3: 32767}}),
+    ("c_left", "C left", {"axes": {2: -32767}}),
+    ("c_right", "C right", {"axes": {2: 32767}}),
+    ("z", "Z", {"axes": {5: 32767}}),
+    ("l", "L", {"held": {BTN_LSHOULDER}}),
+    ("r", "R", {"held": {BTN_RSHOULDER}}),
+    ("start", "Start", {"held": {BTN_START}}),
+    ("dpad_up", "D-pad up", {"held": {BTN_DPAD_UP}}),
+    ("dpad_down", "D-pad down", {"held": {BTN_DPAD_DOWN}}),
+    ("dpad_left", "D-pad left", {"held": {BTN_DPAD_LEFT}}),
+    ("dpad_right", "D-pad right", {"held": {BTN_DPAD_RIGHT}}),
+]
+
+# How far an axis must travel to count as "that one". Well above a resting
+# trigger or a stick's drift, well below full deflection.
+MAP_AXIS_ON = 20000
+
+PAD_MAPS = os.path.join(STATE_DIR, "pad-maps.json")
+
+
+def pad_map_key(pad):
+    """Which controller a learned mapping belongs to.
+
+    The physical device, always: a learned map is about hardware and must
+    never be filed under a Steam slot. A pad that has not been identified
+    cannot be mapped, and the screen says so rather than recording one.
+    """
+    real = getattr(pad, "real", None) or {}
+    if not real.get("vendor"):
+        return None
+    return f"{real['vendor']:04x}:{real['product']:04x}"
+
+
+def load_pad_map(pad):
+    key = pad_map_key(pad)
+    if not key:
+        return None
+    return load_json(PAD_MAPS, {}).get(key)
+
+
+def save_pad_map(pad, learned):
+    key = pad_map_key(pad)
+    if not key:
+        return
+    maps = load_json(PAD_MAPS, {})
+    maps[key] = {"name": (pad.real or {}).get("name"),
+                 "learned": learned,
+                 "when": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    tmp = PAD_MAPS + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(maps, fh, indent=2, sort_keys=True)
+    os.replace(tmp, PAD_MAPS)
+    print(f"map: saved {len(learned)} control(s) for {key}", flush=True)
+
+
+def map_screen(ui, pad, step, index, total, learned):
+    """The ordinary N64 map with one control lit, and a prompt beneath it."""
+    role, label, fake = step
+    draw_frame(ui, "Mapping this controller",
+               f"{pad.display} \u2014 press the highlighted button")
+    bw = int(ui.w * 0.62)
+    bh = int(bw / PAD_ASPECT_N64)
+    draw_gamepad(ui, (ui.w - bw) // 2, int(ui.h * 0.22), bw, bh,
+                 PLAYER_COLORS[(pad.slot or 1) - 1], fake.get("held", set()),
+                 fake.get("axes", {}), CARD, layout="n64")
+    y = int(ui.h * 0.22) + bh + 30
+    ui.text(label, int(ui.w * 0.5) - ui.text_size(label, "huge")[0] // 2,
+            y, "huge", ACCENT)
+    y += ui.size["huge"] + 14
+    tag = f"{index} of {total}"
+    ui.text(tag, int(ui.w * 0.5) - ui.text_size(tag, "small")[0] // 2,
+            y, "small", DIM)
+    draw_hint(ui, "Back = stop and keep what has been mapped")
 
 
 def message_screen(ui, title, lines, color=BAD):
@@ -4810,6 +4933,7 @@ def main():
     log_layouts(pads)
 
     state = "roster"
+    mapping = None           # the control-mapping walk, if one is running
     claimed_p1 = None       # key of the pad that took P1; one claim per session
     last_sig = None         # what was last painted, so we can skip redraws
     result = None
@@ -4929,6 +5053,18 @@ def main():
                     holding.pop((pkey, btn), None)
                     if btn == BTN_BACK:
                         state = "exit"
+                    elif btn == "map":
+                        # L and R together teach preflight this controller.
+                        # Offered on the N64 map because that is where a
+                        # pad's own buttons are least likely to sit where a
+                        # stand-in's would: a real N64 pad has C buttons and
+                        # no right stick, and no table can place those for
+                        # every controller that will ever exist.
+                        target = next((q for q in pads if q.key == pkey), None)
+                        if target is not None and pad_map_key(target):
+                            mapping = {"key": pkey, "step": 0, "learned": {}}
+                            state = "mapping"
+                            last_sig = None
                     elif btn == BTN_START:
                         state = "commit"
 
@@ -4950,6 +5086,41 @@ def main():
                               wiiu=("pro" if p1_pro else "gamepad")
                               if backend == "cemu" else None)
                 ui.present()
+
+        elif state == "mapping":
+            pad = next((q for q in pads if q.key == mapping["key"]), None)
+            if pad is None or mapping["step"] >= len(MAP_STEPS_N64):
+                if pad is not None and mapping["learned"]:
+                    save_pad_map(pad, mapping["learned"])
+                mapping, state = None, "roster"
+                last_sig = None
+                continue
+            # An axis has no press event, so it is read every frame.
+            step = MAP_STEPS_N64[mapping["step"]]
+            got = None
+            for ax, value in pad.axes.items():
+                if abs(value) >= MAP_AXIS_ON:
+                    got = ["axis", ax, 1 if value > 0 else -1]
+                    break
+            if got and mapping.get("armed", True):
+                mapping["learned"][step[0]] = got
+                print(f"map: {step[1]} = axis {got[1]} {'+' if got[2] > 0 else '-'}",
+                      flush=True)
+                mapping["step"] += 1
+                mapping["armed"] = False
+                last_sig = None
+            elif not got:
+                # Rearm once everything is back at rest, so one long push
+                # cannot answer two questions.
+                mapping["armed"] = True
+            sig = ("mapping", mapping["step"])
+            if sig != last_sig:
+                last_sig = sig
+                if mapping["step"] < len(MAP_STEPS_N64):
+                    map_screen(ui, pad, MAP_STEPS_N64[mapping["step"]],
+                               mapping["step"] + 1, len(MAP_STEPS_N64),
+                               mapping["learned"])
+                    ui.present()
 
         elif state == "error":
             if last_sig != "error":
@@ -4980,6 +5151,21 @@ def main():
                 if pad is None:
                     continue
                 pad.held.add(btn)
+                if state == "mapping":
+                    if pad.key != mapping["key"]:
+                        continue
+                    if btn == BTN_BACK:
+                        if mapping["learned"]:
+                            save_pad_map(pad, mapping["learned"])
+                        mapping, state = None, "roster"
+                        last_sig = None
+                        continue
+                    step = MAP_STEPS_N64[mapping["step"]]
+                    mapping["learned"][step[0]] = ["button", btn]
+                    print(f"map: {step[1]} = button {btn}", flush=True)
+                    mapping["step"] += 1
+                    last_sig = None
+                    continue
                 if presses_logged[0] < PRESS_LOG_LIMIT:
                     presses_logged[0] += 1
                     print(f"press: P{pad.slot or '-'} btn={btn} "
@@ -5077,6 +5263,16 @@ def main():
                 # it, nobody on the sofa could close the tool at all.
                 if btn == BTN_BACK:
                     holding[(pad.key, BTN_BACK)] = now
+                    continue
+
+                # Hold L and R together to teach preflight this pad. Not Y:
+                # a real N64 controller has no Y, and the gesture has to be
+                # reachable on the very pads that need mapping most.
+                if (pad.slot and layout_for(backend) == "n64"
+                        and btn in (BTN_LSHOULDER, BTN_RSHOULDER)
+                        and BTN_LSHOULDER in pad.held
+                        and BTN_RSHOULDER in pad.held):
+                    holding[(pad.key, "map")] = now
                     continue
 
                 if pad.slot != 1:
