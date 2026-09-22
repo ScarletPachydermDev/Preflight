@@ -2708,7 +2708,7 @@ def write_gopher_config(cfg_path, pads, app_id=None, exe=None):
             used.add(index)
             ports.append((pad, index))
             print(f"gopher64: P{pad.slot} {pad.label} -> controller "
-                  f"{index + 1} ({names[index]}) by elimination", flush=True)
+                  f"{index} ({names[index]}) by elimination", flush=True)
         unmatched = []
     skipped.extend(unmatched)
 
@@ -2736,12 +2736,19 @@ def write_gopher_config(cfg_path, pads, app_id=None, exe=None):
     os.replace(tmp, cfg_path)
 
     for pad, index in ports:
-        out = gopher_run(["--assign-controller", str(index + 1),
+        # gopher64 numbers from zero and prints "Controller 0: None" first,
+        # so the number it prints IS the position in the list we parsed.
+        # Passing index + 1 handed it the entry AFTER the right one:
+        # measured on a three-entry list, where P1's N64 pad at index 1 was
+        # assigned as controller 2 and gopher64 duly bound the idle Steam
+        # virtual pad. The game then saw no input at all. Verified the other
+        # way too: --assign-controller 2 recorded the N64 pad's own node.
+        out = gopher_run(["--assign-controller", str(index),
                           "--port", str(pad.slot)], app_id, exe)
         if out is None or out.returncode != 0:
             return [f"gopher64 refused to take P{pad.slot}'s controller "
                     f"assignment ({names[index]})."]
-        print(f"gopher64: P{pad.slot} {pad.label} -> controller {index + 1} "
+        print(f"gopher64: P{pad.slot} {pad.label} -> controller {index} "
               f"({names[index]})", flush=True)
 
     # gopher64 rewrote the file to record the devices; make sure what it kept
