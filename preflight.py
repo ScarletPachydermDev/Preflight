@@ -110,8 +110,22 @@ def nintendo_layout(pad):
 
     Reads the physical device when preflight has paired one — under Steam
     Input the virtual pad's own vendor is always Valve's and says nothing.
+
+    An unidentified virtual pad gets False rather than a guess. Its SDL name
+    is Steam's, and Steam puts real device names on the wrong pads: a Steam
+    Controller arrived as "8BitDo SN30 Pro", the name matched the Nintendo
+    hints, and the pad came out mirrored — inverted faces on a controller
+    whose letters are Xbox's. The name was already distrusted for the label;
+    it has no more business deciding the letters.
+
+    False is the safe default and not merely the cautious one. Mirroring is
+    the exception, applied to a minority of pads, so a pad nobody can
+    identify is far likelier to want the plain mapping — and on the screens
+    that have one, both triggers flip it.
     """
     real = getattr(pad, "real", None) or {}
+    if not real and (pad.vendor, pad.product) == STEAM_VIRTUAL:
+        return False
     vendor = real.get("vendor") if real else pad.vendor
     if vendor in NINTENDO_VENDORS:
         return True
