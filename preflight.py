@@ -4603,6 +4603,11 @@ MAP_STEPS_N64 = [
 # trigger or a stick's drift, well below full deflection.
 MAP_AXIS_ON = 20000
 
+# How long a control sits lit before the walk moves on without it. A pad
+# that has no such button needs a way past, and no button can mean "skip"
+# when what its buttons are is the thing being asked.
+MAP_SKIP_MS = 8000
+
 PAD_MAPS = os.path.join(STATE_DIR, "pad-maps.json")
 
 
@@ -4641,7 +4646,7 @@ def save_pad_map(pad, learned):
     print(f"map: saved {len(learned)} control(s) for {key}", flush=True)
 
 
-def map_screen(ui, pad, step, index, total, learned):
+def map_screen(ui, pad, step, index, total, skip_in):
     """The ordinary N64 map with one control lit, and a prompt beneath it."""
     role, label, fake = step
     draw_frame(ui, "Mapping this controller",
@@ -4656,9 +4661,11 @@ def map_screen(ui, pad, step, index, total, learned):
             y, "huge", ACCENT)
     y += ui.size["huge"] + 14
     tag = f"{index} of {total}"
+    if skip_in:
+        tag += f"   \u2014   skipping in {skip_in}s if your pad has no {step[1]}"
     ui.text(tag, int(ui.w * 0.5) - ui.text_size(tag, "small")[0] // 2,
             y, "small", DIM)
-    draw_hint(ui, "Back = stop and keep what has been mapped")
+    draw_hint(ui, "Home = stop and keep what has been mapped")
 
 
 def message_screen(ui, title, lines, color=BAD):
@@ -5095,7 +5102,11 @@ def main():
                 mapping, state = None, "roster"
                 last_sig = None
                 continue
-            # An axis has no press event, so it is read every frame.
+            # An axis has no press event, so it is polled — and it has to
+            # be polled HERE too. Reading axes only on the roster screen
+            # left them frozen at whatever they held when the walk started,
+            # so Z and C-down could never have been learned.
+            read_axes(sdl, pads, axes_logged)
             step = MAP_STEPS_N64[mapping["step"]]
             got = None
             for ax, value in pad.axes.items():
@@ -5108,18 +5119,31 @@ def main():
                       flush=True)
                 mapping["step"] += 1
                 mapping["armed"] = False
+                mapping["since"] = now
                 last_sig = None
             elif not got:
                 # Rearm once everything is back at rest, so one long push
                 # cannot answer two questions.
                 mapping["armed"] = True
-            sig = ("mapping", mapping["step"])
+            # Waiting is how a control this pad does not have gets past:
+            # no button can mean "skip" when the point of the walk is that
+            # we do not yet know what its buttons are.
+            mapping.setdefault("since", now)
+            left = max(0, MAP_SKIP_MS - (now - mapping["since"])) // 1000
+            if now - mapping["since"] >= MAP_SKIP_MS:
+                print(f"map: {step[1]} skipped", flush=True)
+                mapping["step"] += 1
+                mapping["since"] = now
+                last_sig = None
+            sig = ("mapping", mapping["step"], left)
             if sig != last_sig:
                 last_sig = sig
                 if mapping["step"] < len(MAP_STEPS_N64):
                     map_screen(ui, pad, MAP_STEPS_N64[mapping["step"]],
                                mapping["step"] + 1, len(MAP_STEPS_N64),
-                               mapping["learned"])
+                               # Only near the end, so the offer to move on
+                               # does not read as a countdown to hurry up.
+                               left if left <= 4 else 0)
                     ui.present()
 
         elif state == "error":
@@ -5154,7 +5178,12 @@ def main():
                 if state == "mapping":
                     if pad.key != mapping["key"]:
                         continue
-                    if btn == BTN_BACK:
+                    # No cancel on Back. SDL's Back is button 4, and on a
+                    # Nintendo N64 Controller button 4 is a C button — so
+                    # pressing C stopped the very walk that exists to find
+                    # out where C is. Home is not one of the steps and is
+                    # not a face button on anything here.
+                    if btn == BTN_GUIDE:
                         if mapping["learned"]:
                             save_pad_map(pad, mapping["learned"])
                         mapping, state = None, "roster"
@@ -5164,6 +5193,7 @@ def main():
                     mapping["learned"][step[0]] = ["button", btn]
                     print(f"map: {step[1]} = button {btn}", flush=True)
                     mapping["step"] += 1
+                    mapping["since"] = now
                     last_sig = None
                     continue
                 if presses_logged[0] < PRESS_LOG_LIMIT:
