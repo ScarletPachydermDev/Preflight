@@ -5048,6 +5048,7 @@ def main():
     # log with the one thing it already proved.
     presses_logged = [0]
     axes_logged = set()
+    raw_logged = {"_said": set()}
     last_press = {}         # pad key -> tick, for the pairing guard above
     pairing_logged = [0]
 
@@ -5122,6 +5123,19 @@ def main():
             read_axes(sdl, pads, axes_logged)
             if layout_for(backend) == "n64":
                 read_raw(sdl, pads)
+                # Every raw button, as it goes down. SDL's gamepad view
+                # names only the buttons it has a role for, and an emulator
+                # may be reading the pad at either level — so when a binding
+                # reaches the game as the wrong control, this is the line
+                # that says which number the button really is.
+                for _p in pads:
+                    _before = raw_logged.setdefault(_p.key, set())
+                    for _b in sorted(_p.raw - _before):
+                        if len(raw_logged["_said"]) < 40:
+                            raw_logged["_said"].add((_p.key, _b))
+                            print(f"raw: P{_p.slot or '-'} joystick button "
+                                  f"{_b} down", flush=True)
+                    raw_logged[_p.key] = set(_p.raw)
             # No swap gesture on a map that cannot swap: a PlayStation pad's
             # shapes are positions, so the two triggers would flip a setting
             # with nothing to act on — and a pad carries that setting across
