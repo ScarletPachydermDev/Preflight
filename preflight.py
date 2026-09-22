@@ -2445,12 +2445,22 @@ GOPHER_NATIVE_N64_MIRRORED = dict(GOPHER_NATIVE_N64,
 def native_n64(pad):
     """True for a controller that IS an N64 pad rather than standing in for one.
 
-    Read from the paired hardware: the virtual pad Steam offers says only
-    Valve. A pad nobody has identified gets the generic table, which is the
-    right default — almost every pad playing an N64 game is a modern one.
+    From the paired hardware when there is some, and otherwise from the pad
+    itself. Both cases are real: under Steam Input every pad is a virtual one
+    whose vendor is Valve's, so only the pairing knows — but with Steam Input
+    OFF the pad IS the device and carries its own ids, and looking only at
+    the pairing missed that entirely. It came back False for a controller
+    plainly announcing itself as 057e:2019, so the generic table was used,
+    the Nintendo mirror was applied on top, and C right — which is SDL's
+    Back on this pad — went on counting down to quit.
+
+    A pad nobody can identify gets the generic table, which is the right
+    default: almost every pad playing an N64 game is a modern one.
     """
     real = getattr(pad, "real", None) or {}
-    return (real.get("vendor"), real.get("product")) in NATIVE_N64
+    if real:
+        return (real.get("vendor"), real.get("product")) in NATIVE_N64
+    return (pad.vendor, pad.product) in NATIVE_N64
 
 
 def gopher_profile_name(slot):
@@ -4623,13 +4633,16 @@ def pad_map_key(pad):
     """Which controller a learned mapping belongs to.
 
     The physical device, always: a learned map is about hardware and must
-    never be filed under a Steam slot. A pad that has not been identified
-    cannot be mapped, and the screen says so rather than recording one.
+    never be filed under a Steam slot. With Steam Input off the pad is the
+    device and answers for itself; under Steam Input only the pairing knows.
+    A pad that is neither cannot be mapped.
     """
     real = getattr(pad, "real", None) or {}
-    if not real.get("vendor"):
-        return None
-    return f"{real['vendor']:04x}:{real['product']:04x}"
+    if real.get("vendor"):
+        return f"{real['vendor']:04x}:{real['product']:04x}"
+    if (pad.vendor, pad.product) != STEAM_VIRTUAL and pad.vendor:
+        return f"{pad.vendor:04x}:{pad.product:04x}"
+    return None
 
 
 def load_pad_map(pad):
