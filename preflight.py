@@ -90,15 +90,26 @@ def is_steam_controller(pad):
     It has no kernel device node, so it can never be paired to one — and a
     pairing is how every other virtual pad learns what hardware it is.
 
-    The name is not reliable on its own: Steam calls the same pad "Steam
-    Controller" on one run and "Microsoft X-Box 360 pad 0" on the next, and
-    on a run where it came through generic this check missed it and the pad
-    was matched to an 8bitdo's hardware — crossed labels, both pads swapped.
-    So the answer is REMEMBERED: once a pad has been seen under its proper
-    name, its identity is kept against the same id in known_pads.json and
-    used however Steam names it next time.
+    The name is worthless here. Steam calls the same pad "Steam Controller"
+    on one run and "Microsoft X-Box 360 pad 0" on the next, and it does not
+    even keep the names with the right pads: a run with three pads showed
+    the Xbox one as "Steam Controller", the Steam Controller as "8BitDo
+    SN30 Pro" and the 8bitdo as "Xbox One controller" — every name present
+    and every one on the wrong pad.
+
+    Remembering the answer was worse. It was stored against the pad's
+    store_key, which for a virtual pad is a `crc:` SLOT — and Steam reparks
+    controllers between slots, so "this one is a Steam Controller" landed on
+    whichever pad held that slot next, and blocked it from ever pairing.
+    See is_hardware_key, which every other remembered field respects.
+
+    So the answer comes from evidence instead: a Steam Controller is held at
+    hidraw level and has no kernel node, so pressing it moves nothing the
+    watcher can see. A pad that has been pressed several times with no real
+    device firing alongside is that pad. This decides itself during the run
+    and cannot be inherited by anyone else.
     """
-    if getattr(pad, "known_steam_controller", False):
+    if getattr(pad, "no_kernel_node", False):
         return True
     for name in (getattr(pad, "gc_name", None), getattr(pad, "name", None)):
         if name and "steam controller" in name.lower():
@@ -528,6 +539,10 @@ class Pad:
         self.axes = {}            # axis id -> raw -32768..32767
         self.display = None       # filled in by label_pads()
         self.real = None          # the physical device behind a virtual pad
+        # Pressed with no real device stirring — see is_steam_controller.
+        self.no_kernel_node = False
+        self.silent_presses = 0
+        self.silent_since = None
         # A/B and X/Y always move together — no real controller mirrors one
         # pair without the other — so this is a single setting.
         self.swap_faces = False
@@ -833,9 +848,6 @@ def apply_known(pads, known):
     for p in pads:
         rec = known.get(p.store_key)
         if rec:
-            # Steam renames this pad between runs; the file remembers what it
-            # really is. See is_steam_controller.
-            p.known_steam_controller = bool(rec.get("steam_controller"))
             # Records without a schema marker predate friendly labels, and
             # their `nickname` was auto-filled with whatever SDL happened to
             # report that run — which would override the real label forever.
@@ -877,10 +889,10 @@ def remember(pads, known):
                 # controller Steam parks there next time.
                 "swap_faces": p.swap_faces if is_hardware_key(p.store_key) else False,
                 "swap_explicit": bool(getattr(p, "swap_explicit", False)),
-                # Kept because Steam does not name this pad the same way
-                # twice, and a pad it renames generically must still never
-                # be matched to somebody else's hardware.
-                "steam_controller": is_steam_controller(p),
+                # Recorded for the log only. It is never read back: it used
+                # to be, and against a `crc:` slot key it handed one pad's
+                # identity to whoever Steam parked there next.
+                "steam_controller_seen": is_steam_controller(p),
                 "last_seen": time.strftime("%Y-%m-%dT%H:%M:%S"),
             }
     save_known(known)
@@ -4791,7 +4803,28 @@ def main():
                     hit = reals.claim(now, taken)
                     if hit:
                         bind_real(pad, hit, known, pads)
-                    elif pairing_logged[0] < 12:
+                    elif reals.available and not reals.recent:
+                        # Pressed, and not one real device stirred. Nothing
+                        # with a kernel node behaves like this; a Steam
+                        # Controller, held at hidraw, always does. Three in
+                        # a row is the answer, and it stops this pad from
+                        # taking hardware that belongs to someone else.
+                        pad.silent_presses += 1
+                        if pad.silent_since is None:
+                            pad.silent_since = now
+                        # Spread over time as well as counted: a pad that
+                        # has just reconnected has a node the watcher has
+                        # not opened yet, and three fast presses inside that
+                        # gap would otherwise convict it. The watcher
+                        # re-scans every second.
+                        settled = now - pad.silent_since >= 2 * reals.REFRESH_MS
+                        if (pad.silent_presses >= 3 and settled
+                                and not pad.no_kernel_node):
+                            pad.no_kernel_node = True
+                            print(f"pair: P{pad.slot or '-'} {pad.display} has "
+                                  f"no kernel node — treating it as a Steam "
+                                  f"Controller", flush=True)
+                    if not hit and pairing_logged[0] < 12:
                         # Say when a press went by without identifying the
                         # pad: silence here reads as "nothing to see", and
                         # what it actually means is that this pad's face
