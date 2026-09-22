@@ -95,15 +95,41 @@ Three tiers, best first:
    forever.
 2. **Name-CRC** (`crc:f679`), for a Steam virtual pad. Identifies the *slot*,
    not the device — Steam reassigns them between sessions.
-3. SDL's reported name, for display only.
+3. SDL's reported name — **not usable, not even for display.** Steam puts a
+   real device's name on each virtual pad and puts them on the *wrong pads*.
+   Measured 2026-09-22 with four connected: the 8bitdo arrived as
+   "Steam Controller", the Steam Controller as "8BitDo SN30 Pro", the Xbox
+   pad as "8BitDo SN30 Pro" on another run. Every name present, every one
+   misplaced, consistently rather than at random. An unpaired pad is
+   therefore labelled `Controller 37f8` and given no letters guess. Three
+   rounds of debugging went after the wrong controller because this string
+   was trusted.
 
 Under Steam Input every pad is a virtual pad with no MAC, so tier 1 would be
 unavailable — except that Steam only *hides* the physical devices from SDL via
 `SDL_GAMECONTROLLER_IGNORE_DEVICES`. The kernel devices remain. `RealWatcher`
-reads those evdev nodes and pairs a virtual pad to its hardware by correlating
-the same button press on both (250 ms window; refuses to pair when two devices
-fire at once). That is what turns `Steam pad f679` into
+reads those nodes and pairs a virtual pad to its hardware by correlating the
+same button press on both (250 ms window; refuses to pair when two devices
+fire at once). That is what turns `Controller f679` into
 `Xbox Series X|S Controller` and restores durable per-pad settings.
+
+**Two channels, because one is not enough.** evdev pairs during a real game
+launch but is silent otherwise: a capture on `/dev/input/event21` and
+`event23` with every button on two pads being pressed recorded *nothing*
+outside a launch. hidraw carries the reports either way — it is not
+exclusive, so Steam reads it and so can Preflight — but there a press is a
+**change** in the report, since an idle pad streams the same bytes for ever.
+Both are watched, and a device is identified by (vendor, product, MAC) rather
+than by node path, because the same controller now appears on both.
+
+**`pair_by_elimination` is deleted, permanently.** It bound the one
+unidentified pad to the one unaccounted-for device, before anybody had
+pressed anything. That is only sound if both counts are right, and they were
+not: it bound an 8bitdo's pad to an Xbox controller on one run
+(`pair: 8BitDo SN30 Pro must be Xbox Wireless Controller`, 18:15) and the
+reverse on the next, crossing the labels and the face mapping with them. It
+looked like success in the log, which is why it survived so long. Do not
+reintroduce a guess that outruns the evidence.
 
 ### Config writing
 
@@ -471,12 +497,28 @@ anything the OS or SDL reports: `nintendo_layout()` reads the PHYSICAL
 device's USB vendor (0x057E Nintendo, 0x2DC8 8BitDo) and falls back to a list
 of name hints. The vendor half is fact from sysfs; the name half is a guess,
 and it is what missed the 8bitdo first time round. A pad from an unlisted
-vendor therefore comes out inverted with no way for its owner to correct it —
-so the layout log prints the hardware's vendor:product, which is exactly what
-an issue report needs to carry for a new pad to be added. If that route
-proves too slow, the better design is a per-pad setting confirmed once on the
-check screen and remembered, rather than a table trying to know every
-manufacturer.
+vendor therefore comes out inverted, so the layout log prints the hardware's
+vendor:product, which is exactly what an issue report needs to carry for a
+new pad to be added.
+
+And both triggers flip it, on the PlayStation screen as on every other. That
+gesture was removed here once, on the reasoning that shapes are positions and
+so nothing needs swapping. That reasoning is right about the *shapes* and
+wrong about the pads: Steam hands some controllers to SDL by LABEL, so an
+8Bitdo SF30 Pro's printed A arrives as SDL's A although it sits on the east,
+and `Cross = SDL/A` then lands on the wrong button. Nothing readable
+distinguishes the two cases when a pad has not paired. The correction is
+saved under whatever key the pad has, including a `crc:` slot key — a pad
+Steam never lets us pair has no other key it will ever have, and a setting
+that does not survive the launch is worse than one that might land on a
+sibling's pad, which two squeezes undo.
+
+**A letter question cannot calibrate this.** A calibration screen was built
+and thrown away: it asked the player to press the button marked A, and on the
+8bitdo that reported SDL's A — because Steam had already swapped them. It
+measured nothing and wrote the wrong answer confidently. If this is ever
+tried again, ask for a POSITION ("press the bottom button"), which is the
+only unknown.
 
 **With Steam Input OFF this backend is on thin ice, and that is documented
 rather than solved.** Measured repeatedly on 2026-09-21: some pads then arrive
