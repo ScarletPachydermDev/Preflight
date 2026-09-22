@@ -2613,10 +2613,20 @@ def gopher_entry(pad, template):
                  else GOPHER_NATIVE_N64)
     else:
         table = GOPHER_MIRRORED if pad.swap_faces else GOPHER_IDENTITY
-    # Anything the player taught preflight on the mapping screen overrides
-    # the table, for the same reason it overrides it on the screen: it was
-    # measured on this controller rather than assumed about its kind.
+    # Anything the player taught preflight overrides the table — EXCEPT on a
+    # pad gopher64 numbers differently from us, which is every real N64
+    # controller. The walk measures what preflight's SDL2 reports; gopher64
+    # reads the same pad through its own SDL3 and gets other numbers. On
+    # this controller the C cluster is 2, 3, 4 = left, up, right with C down
+    # on an axis here, and 2, 3, 4, 5 = down, left, up, right there. Writing
+    # the measured numbers into gopher64's config put C back a quarter-turn
+    # out, undoing the table derived from actually playing the game.
+    #
+    # The learned map still rules the check screen, which is preflight's own
+    # SDL and where it was measured.
     table = dict(table)
+    if native_n64(pad):
+        learned = {}
     for role, got in learned.items():
         if role not in table or not got:
             continue
