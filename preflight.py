@@ -2443,8 +2443,13 @@ GOPHER_NATIVE_N64 = dict(
     # with C right written as 4, pressing C UP fired C right. C right is the
     # one left over, and is the only one of the four not confirmed by a
     # press.
+    # C right is not a button on this pad: pressing it moves AXIS 5 to full
+    # travel, which is why no ControllerButton id ever reached it and three
+    # separate guesses at a number all did nothing. Caught by logging every
+    # raw button on the check screen and finding only three for four
+    # presses, with an axis event alongside.
     c_down=_button(2), c_left=_button(3), c_up=_button(4),
-    c_right=_button(5),
+    c_right=_axis(5, 1),
     hotkey=_button(15),
 )
 GOPHER_NATIVE_N64_MIRRORED = dict(GOPHER_NATIVE_N64,
@@ -4846,7 +4851,12 @@ def update_gc_holds(pads, holding, now):
     """
     for pad in pads:
         start = BTN_START in pad.held
-        shoulder = BTN_LSHOULDER in pad.held or BTN_RSHOULDER in pad.held
+        # Z is an ANALOG trigger on a real N64 controller, not a shoulder
+        # button, so Z+Start never registered and Start alone started the
+        # game — the opposite of what was wanted. Either trigger counts.
+        shoulder = (BTN_LSHOULDER in pad.held or BTN_RSHOULDER in pad.held
+                    or pad.axes.get(sdlui.AXIS_TRIGGERLEFT, 0) > GC_SWAP_ON
+                    or pad.axes.get(sdlui.AXIS_TRIGGERRIGHT, 0) > GC_SWAP_ON)
         # Quit is every pad's, as everywhere else; starting is P1's alone.
         # The bare Back clause is dropped for a pad that IS an N64
         # controller. Steam's stand-in maps its C up onto Back, so holding
