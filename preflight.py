@@ -126,6 +126,11 @@ def nintendo_layout(pad):
     real = getattr(pad, "real", None) or {}
     if not real and (pad.vendor, pad.product) == STEAM_VIRTUAL:
         return False
+    # A real N64 controller is Nintendo's, and its letters are still SDL's:
+    # the kernel puts its A on BTN_SOUTH, so A arrives as SDL's A. Mirroring
+    # it on the strength of the vendor id crossed the two on screen.
+    if native_n64(pad):
+        return False
     vendor = real.get("vendor") if real else pad.vendor
     if vendor in NINTENDO_VENDORS:
         return True
@@ -2415,9 +2420,9 @@ NATIVE_N64 = {(0x057E, 0x2019)}
 
 GOPHER_NATIVE_N64 = dict(
     GOPHER_IDENTITY,
-    # A sits east on an N64 pad and B beside it, which is where SDL reports
-    # them — the reverse of the generic table's assumption.
-    a=_button(1), b=_button(0),
+    # A and B are left as the generic table has them: this pad's A arrives
+    # on SDL's A. RetroArch's file numbers them the other way round because
+    # it is describing its own RetroPad, not SDL's.
     # Z is the LEFT trigger here. The generic table moves it right to leave
     # the left one free for a Steam Input C-shift, which a pad with real C
     # buttons has no use for.
@@ -3579,7 +3584,8 @@ class Bay:
 
 
 def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
-                 dim=False, holds=None, wys=None, layout="switch"):
+                 dim=False, holds=None, wys=None, layout="switch",
+                 native=False):
     """A button map — no controller body.
 
     Drawing a shape means picking *a* shape, and every real pad is a different
@@ -3607,7 +3613,10 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
                 "n64": _n64_controls,
                 "playstation": _playstation_controls}.get(
                     layout, _switch_controls)
-    controls(g, held, axes, swap, holds or {}, wys)
+    if controls is _n64_controls:
+        controls(g, held, axes, swap, holds or {}, wys, native)
+    else:
+        controls(g, held, axes, swap, holds or {}, wys)
 
 
 class Layout:
@@ -3974,10 +3983,20 @@ N64_START_DOWN = 0.12
 # Which way each C button reads on the stick gopher64 binds it to.
 N64_C_AXES = {"c_up": (3, -1), "c_down": (3, 1),
               "c_left": (2, -1), "c_right": (2, 1)}
+
+# The same four on a controller that HAS C buttons. A Nintendo Switch Online
+# N64 Controller reports them as three buttons and an axis, and has no right
+# stick at all — so the table above could never light on it, whichever way
+# the player pressed. Read off SDL's own mapping for 057e:2019 and confirmed
+# against the press log: buttons 2, 3, 4 and axis 5.
+N64_C_NATIVE = {"c_up": ("b", 3), "c_left": ("b", 2), "c_right": ("b", 4),
+                "c_down": ("a", 5)}
+# Z is the LEFT trigger on that pad, not the right one.
+N64_Z_AXIS_NATIVE = 4
 N64_C_DEADZONE = 12000
 
 
-def _n64_controls(g, held, axes, swap, holds, wys):
+def _n64_controls(g, held, axes, swap, holds, wys, native=False):
     """What an N64 pad has, in the places the other maps put their own.
 
     Three things are the pad's own. There is one analog stick, so the second
@@ -3996,7 +4015,8 @@ def _n64_controls(g, held, axes, swap, holds, wys):
     # digital on this pad even though gopher64 reads it off a trigger axis.
     draw_top_row(g, lay, (
         Control(-(lay.TRIGGER + N64_Z_OUT), "z",
-                S(0.31 * N64_TOP * N64_Z), axis=5),
+                S(0.31 * N64_TOP * N64_Z),
+                axis=N64_Z_AXIS_NATIVE if native else 5),
         Control(-lay.SHOULDER, "l", S(0.31 * N64_TOP), (BTN_LSHOULDER,)),
         Control(lay.SHOULDER, "r", S(0.31 * N64_TOP), (BTN_RSHOULDER,)),
         # Start sits lower than the rest of the row: the hold ring is drawn
@@ -4031,7 +4051,11 @@ def _n64_controls(g, held, axes, swap, holds, wys):
             g.face(name, cx, cy, w, h, pressed=letter in live, wys=wys)
             continue
         down = False
-        if name in N64_C_AXES:
+        if native and name in N64_C_NATIVE:
+            kind, num = N64_C_NATIVE[name]
+            down = (num in held if kind == "b"
+                    else axes.get(num, 0) > N64_C_DEADZONE)
+        elif name in N64_C_AXES:
             axis, sign = N64_C_AXES[name]
             down = axes.get(axis, 0) * sign > N64_C_DEADZONE
         g.glyph(name, cx, cy, w, h, active=down)
@@ -4449,7 +4473,10 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
                      dim=pad is None,
                      holds=holds.get(pad.key) if pad else None,
                      wys=pad_wysiwyg(pad) if pad else None,
-                     layout=layout)
+                     layout=layout,
+                     # A controller that IS an N64 pad puts its C buttons
+                     # and its Z somewhere a stand-in never does.
+                     native=bool(pad) and native_n64(pad))
 
         if pad:
             label, lc = pad.label, FG
