@@ -350,22 +350,26 @@ SPOOF_MODE = {0x045E: "X-input", 0x057E: "Switch mode", 0x054C: "PS mode"}
 
 STEAM_VIRTUAL = (0x28DE, 0x11FF)
 
-# Names Steam gives a virtual pad when it isn't telling us what's behind it.
-GENERIC_VIRTUAL = ("x-box 360 pad", "steam virtual gamepad", "xbox 360 controller")
 
 
 def label_pads(pads):
     """Resolve display names with the whole set in view.
 
     Under Steam Input every pad is a Steam virtual pad sharing one
-    vendor/product, so the vendor tables cannot name them. Steam often does
-    put the real device's name on the virtual pad — "Steam Controller",
-    "Xbox One controller" — so that is used when it is informative, and a
-    short slot tag when it is not.
+    vendor/product, so the vendor tables cannot name them. Steam does put a
+    real device's name on each virtual pad — but it puts them on the WRONG
+    ONES. Measured with four pads: the 8bitdo arrived as "Steam Controller",
+    the Steam Controller as "8BitDo SN30 Pro". Every name present, every one
+    misplaced, and consistently so rather than at random.
 
-    The CRC is NOT a durable identity for a physical controller: it tracks the
-    virtual pad slot, and Steam moves devices between slots. It is reliable
-    within one session, which is all the config write needs.
+    So a virtual pad that has not been matched to real hardware is not given
+    a name at all. It gets a neutral tag, which is merely uninformative,
+    rather than a confident label that is wrong — which sent three rounds of
+    debugging after the wrong controller.
+
+    The CRC in that tag is the slot, not the controller: it is SDL's checksum
+    of "Microsoft X-Box 360 pad N", so it distinguishes two unnamed pads
+    within a session and means nothing between sessions.
     """
     for p in pads:
         if p.nickname:
@@ -378,9 +382,7 @@ def label_pads(pads):
                                             vendor=p.real["vendor"],
                                             product=p.real["product"]))
         elif (p.vendor, p.product) == STEAM_VIRTUAL:
-            name = (p.name or "").strip()
-            generic = not name or any(g in name.lower() for g in GENERIC_VIRTUAL)
-            p.display = f"Steam pad {p.name_crc:04x}" if generic else name
+            p.display = f"Controller {p.name_crc:04x}"
         else:
             p.display = friendly_name(p)
 
