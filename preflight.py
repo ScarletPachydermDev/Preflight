@@ -2535,7 +2535,25 @@ def gopher_path_for(pad):
     A physical pad is not so simple: SDL may hand us a /dev/hidraw path for
     one, and gopher64 may open it as evdev instead. Those go the long way
     round, through gopher64's own --assign-controller.
+
+    THE REAL DEVICE WINS when we have identified one. The virtual pad's own
+    node is a Steam virtual pad — `28de:11ff Microsoft X-Box 360 pad 0` —
+    and gopher64 reads it as exactly that: an Xbox 360 pad. Measured with a
+    Nintendo N64 Controller, where preflight paired the real pad on event21
+    and handed gopher64 event20. gopher64 then played a virtual 360 pad,
+    which has no C buttons, whose axis 4 is a stick rather than a trigger,
+    and whose letters are Xbox's — so C did nothing, Z did nothing, and A
+    and B were crossed. gopher64's own listing names the physical devices
+    ("Nintendo N64 Controller"), which is the clue that it opens those.
     """
+    real = getattr(pad, "real", None) or {}
+    if real:
+        # The pad may have been paired over hidraw; gopher64 wants evdev, so
+        # find the same controller's event node by identity.
+        want = dev_ident(real)
+        for info in scan_real_gamepads():
+            if dev_ident(info) == want:
+                return info["path"]
     path = getattr(pad, "devpath", None)
     return path if path and path.startswith("/dev/input/event") else None
 
@@ -2555,7 +2573,14 @@ def gopher_entry(pad, template):
     """One input profile for this pad: gopher64's own keyboard half kept,
     the controller half written from scratch."""
     if native_n64(pad):
-        table = (GOPHER_NATIVE_N64_MIRRORED if pad.swap_faces
+        # Only if the player asked. swap_faces defaults to true here —
+        # nintendo_layout reads vendor 057E and is right that the pad is
+        # Nintendo's — but the native table already has A and B where this
+        # hardware puts them, so the mirror on top undid it and the two came
+        # out crossed. A guess about letters has nothing to add to a table
+        # written from the hardware itself.
+        table = (GOPHER_NATIVE_N64_MIRRORED
+                 if getattr(pad, "swap_explicit", False) and pad.swap_faces
                  else GOPHER_NATIVE_N64)
     else:
         table = GOPHER_MIRRORED if pad.swap_faces else GOPHER_IDENTITY
