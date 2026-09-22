@@ -909,15 +909,14 @@ def apply_known(pads, known):
             # and "this was the default at the time". Only a deliberate choice
             # survives, so a pad whose layout we later learn about corrects
             # itself instead of staying wrong.
-            # A deliberate choice is honoured on a `crc:` key too. The rule
-            # against those exists because Steam parks pads in slots — but
-            # these keys have proved stable per pad across sessions on the
-            # test machine, and a pad that never pairs has no other key it
-            # could ever be saved under. A setting that will not survive the
-            # launch is worse than one that might land on a sibling's pad,
-            # which two trigger squeezes undo.
+            # Never from a `crc:` key. That was allowed for one build, on the
+            # belief those keys were stable per controller; they are not.
+            # Two launches seven minutes apart had the same 8bitdo in bay 1
+            # and then bay 4, so a preference saved against a slot lands on
+            # whichever pad Steam parks there next.
             explicit = (rec.get("schema", 0) >= 4
-                        and bool(rec.get("swap_explicit")))
+                        and bool(rec.get("swap_explicit"))
+                        and is_hardware_key(p.store_key))
             p.swap_explicit = explicit
             p.swap_faces = (bool(rec.get("swap_faces")) if explicit
                             else default_swap(p))
@@ -941,9 +940,8 @@ def remember(pads, known):
                 # Only recorded against real hardware. Saving it under a
                 # virtual-pad slot would hand the setting to whichever
                 # controller Steam parks there next time.
-                # Saved under whatever key this pad has, including a `crc:`
-                # one — see apply_known.
-                "swap_faces": p.swap_faces,
+                "swap_faces": (p.swap_faces
+                               if is_hardware_key(p.store_key) else False),
                 "swap_explicit": bool(getattr(p, "swap_explicit", False)),
                 # Recorded for the log only. It is never read back: it used
                 # to be, and against a `crc:` slot key it handed one pad's
@@ -4353,15 +4351,12 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
             ([z_art, "sep+", start_art], "P1", p1c, "hold to quit"),
         ]
     elif layout == "playstation":
-        # The swap entry is here after all. The shapes are positions, but
-        # whether SDL's south IS the bottom button depends on how Steam
-        # handed the pad over, and that is not readable — so it is offered
-        # as a correction: squeeze both triggers until Cross is on the
-        # bottom button.
+        # No swap entry: the shapes are positions, and which SDL letter
+        # sits on each one is settled by the pad's own vendor id once it
+        # pairs, not by a person squeezing triggers.
         items = [
             (["ps:start"], "P1", p1c, "hold to start"),
             claim,
-            (["ZL", "sep+", "ZR"], None, anyone, "fix my buttons"),
             (["ps:select"], "P1", p1c, "hold to quit"),
         ]
     else:
@@ -4765,14 +4760,12 @@ def main():
             # shapes are positions, so the two triggers would flip a setting
             # with nothing to act on — and a pad carries that setting across
             # to the other emulators, where it very much does act.
-            # Including the PlayStation screen. The shapes are positions,
-            # but Steam hands some pads to SDL by LABEL — an 8Bitdo SF30
-            # Pro's printed A arrives as SDL's A although it sits on the
-            # east — so nothing preflight reads says where a button
-            # physically is. Three rounds of inferring it put the mirror on
-            # the wrong pad. The person holding the controller can see the
-            # answer in one glance, so let them say it.
-            if update_trigger_swap(pads, armed):
+            # Not on the PlayStation screen: the shapes are positions, and
+            # a paired pad's real vendor id now says which way its letters
+            # run, so there is nothing left for a person to correct. The
+            # gesture lived here briefly while identity was still a guess.
+            if (layout_for(backend) != "playstation"
+                    and update_trigger_swap(pads, armed)):
                 remember(pads, known)
             # Both of these pads quit through Z+Start: neither has a
             # second button to spare for it.
