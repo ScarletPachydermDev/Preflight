@@ -911,8 +911,11 @@ class RumbleCycle:
         now = self.sdl.SDL_GetTicks()
         # Only pads that are genuinely still attached — buzzing a sleeping pad
         # silently "succeeds" and lights its bay for a controller nobody holds.
-        targets = [p for p in sorted(pads, key=lambda q: q.slot)
-                   if p.slot and p.attached()]
+        # Filter before sorting: a spare pad beyond the four bays has slot
+        # None, and sorting that against an int raises — which killed the
+        # whole check screen on a five-pad DuckStation launch.
+        seated = [p for p in pads if p.slot and p.attached()]
+        targets = sorted(seated, key=lambda q: q.slot)
         if not self.enabled or not targets:
             self.active = None
             return
