@@ -708,9 +708,16 @@ class RealWatcher:
     # enough to rule out a stale event.
     CLAIM_MS = 150
 
+    # How long a hidraw device must have been unchanged for the next change
+    # to read as somebody pressing something. Comfortably longer than the
+    # gap between a press and its release, and far longer than the gap
+    # between reports from a pad that streams.
+    HID_IDLE_MS = 400
+
     def __init__(self):
         self.fds = {}
         self.last = {}           # hidraw baseline report, per fd
+        self.last_change = {}    # when each hidraw report last differed
         self.recent = []
         self.available = False
         self.last_refresh = 0
@@ -767,13 +774,30 @@ class RealWatcher:
             except OSError:
                 continue
             if info.get("hid"):
-                # An idle pad streams the same report forever, so arrival
-                # says nothing; a press changes the bytes. The first report
-                # only establishes the baseline.
+                # A press is a change in the report — but only a change that
+                # FOLLOWS A SILENCE. Some pads report continuously whether
+                # or not anyone is touching them: a Nintendo N64 Controller
+                # (057e:2019) never stops, so it sat inside every claim
+                # window and the first pad to be pressed took it, wearing
+                # its name and its Nintendo letters. A device that is always
+                # changing carries no information about who pressed what.
                 was = self.last.get(fd)
                 self.last[fd] = data
-                if was is not None and data != was:
+                if was is None or data == was:
+                    continue
+                since = self.last_change.get(fd)
+                self.last_change[fd] = now
+                if since is None or now - since >= self.HID_IDLE_MS:
                     self.recent.append((now, info))
+                elif not info.get("chatty"):
+                    # Say it once. After this the device simply stops
+                    # appearing, and silence in a log is the hardest thing
+                    # to debug — this one cost an evening.
+                    info["chatty"] = True
+                    print(f"watch: {info['name']} reports continuously "
+                          f"(every {now - since}ms, untouched) — it cannot "
+                          f"be identified by hidraw, only by its evdev node",
+                          flush=True)
                 continue
             for off in range(0, len(data) - 23, 24):
                 _, _, etype, _, value = struct.unpack_from("qqHHi", data, off)
@@ -842,6 +866,7 @@ class RealWatcher:
                 pass
         self.fds.clear()
         self.last.clear()
+        self.last_change.clear()
 
 
 def scan_pads(sdl):
