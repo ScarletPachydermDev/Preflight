@@ -4700,9 +4700,17 @@ def map_screen(ui, pad, step, index, total):
                f"{pad.display} \u2014 press the highlighted button")
     bw = int(ui.w * 0.62)
     bh = int(bw / PAD_ASPECT_N64)
+    # The fake press has to be read back through the SAME table it was
+    # written against, or the C glyphs light from nothing and the step is
+    # drawn on an inert pad. That is what happened: four of the fourteen
+    # steps showed no highlight at all, leaving the label as the only clue,
+    # and the answers came back scrambled.
+    lit = {"z": ("a", 5, 1)}
+    for name, (axis, sign) in N64_C_AXES.items():
+        lit[name] = ("a", axis, sign)
     draw_gamepad(ui, (ui.w - bw) // 2, int(ui.h * 0.22), bw, bh,
                  PLAYER_COLORS[(pad.slot or 1) - 1], fake.get("held", set()),
-                 fake.get("axes", {}), CARD, layout="n64")
+                 fake.get("axes", {}), CARD, layout="n64", src=lit)
     y = int(ui.h * 0.22) + bh + 30
     ui.text(label, int(ui.w * 0.5) - ui.text_size(label, "huge")[0] // 2,
             y, "huge", ACCENT)
