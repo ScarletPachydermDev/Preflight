@@ -288,6 +288,14 @@ def _bind(sdl, ttf):
         if hasattr(sdl, fn):
             getattr(sdl, fn).argtypes = [vp, ci]
             getattr(sdl, fn).restype = SDL_GameControllerButtonBind
+    # Raw joystick buttons. SDL's gamepad mapping covers only the buttons it
+    # has a role for: a Nintendo N64 Controller has sixteen and the mapping
+    # names eleven, so C right — one of the five it leaves out — is invisible
+    # through the gamepad API however hard it is pressed.
+    sdl.SDL_JoystickNumButtons.argtypes = [vp]
+    sdl.SDL_JoystickNumButtons.restype = ci
+    sdl.SDL_JoystickGetButton.argtypes = [vp, ci]
+    sdl.SDL_JoystickGetButton.restype = ctypes.c_ubyte
     sdl.SDL_JoystickInstanceID.argtypes, sdl.SDL_JoystickInstanceID.restype = [vp], ci
     sdl.SDL_JoystickCurrentPowerLevel.argtypes = [vp]
     sdl.SDL_JoystickCurrentPowerLevel.restype = ci

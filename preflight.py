@@ -527,6 +527,8 @@ class Pad:
         self.axes = {}            # axis id -> raw -32768..32767
         self.display = None       # filled in by label_pads()
         self.real = None          # the physical device behind a virtual pad
+        self.raw = set()          # raw joystick buttons down — see read_raw
+        self.raw_count = None
         # A/B and X/Y always move together — no real controller mirrors one
         # pair without the other — so this is a single setting.
         self.swap_faces = False
@@ -2597,8 +2599,12 @@ def gopher_entry(pad, template):
     for role, got in learned.items():
         if role not in table or not got:
             continue
-        table[role] = (_button(got[1]) if got[0] == "button"
-                       else _axis(got[1], got[2]))
+        # A raw button number is written as a button. Whether gopher64 reads
+        # raw joystick numbers or SDL's mapped ones is untested for a button
+        # SDL leaves unmapped — and there is nothing else to write, since
+        # such a button has no mapped number to use instead.
+        table[role] = (_axis(got[1], got[2]) if got[0] == "axis"
+                       else _button(got[1]))
     rows = []
     for i, role in enumerate(GOPHER_SLOTS):
         pair = None
@@ -3595,7 +3601,7 @@ class Bay:
 
 def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
                  dim=False, holds=None, wys=None, layout="switch",
-                 src=None):
+                 src=None, raw=()):
     """A button map — no controller body.
 
     Drawing a shape means picking *a* shape, and every real pad is a different
@@ -3624,7 +3630,7 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
                 "playstation": _playstation_controls}.get(
                     layout, _switch_controls)
     if controls is _n64_controls:
-        controls(g, held, axes, swap, holds or {}, wys, src)
+        controls(g, held, axes, swap, holds or {}, wys, src, raw)
     else:
         controls(g, held, axes, swap, holds or {}, wys)
 
@@ -4024,13 +4030,14 @@ def n64_sources(pad):
     rec = load_pad_map(pad) if pad is not None else None
     for name, got in ((rec or {}).get("learned", {})).items():
         if name in out and got:
-            out[name] = (("b", got[1]) if got[0] == "button"
+            out[name] = (("r", got[1]) if got[0] == "raw"
+                         else ("b", got[1]) if got[0] == "button"
                          else ("a", got[1], got[2]))
     return out
 N64_C_DEADZONE = 12000
 
 
-def _n64_controls(g, held, axes, swap, holds, wys, src=None):
+def _n64_controls(g, held, axes, swap, holds, wys, src=None, raw=()):
     """What an N64 pad has, in the places the other maps put their own.
 
     Three things are the pad's own. There is one analog stick, so the second
@@ -4086,7 +4093,9 @@ def _n64_controls(g, held, axes, swap, holds, wys, src=None):
             continue
         down = False
         where = (src or {}).get(name)
-        if where and where[0] == "b":
+        if where and where[0] == "r":
+            down = where[1] in raw
+        elif where and where[0] == "b":
             down = where[1] in held
         elif where:
             down = axes.get(where[1], 0) * where[2] > N64_C_DEADZONE
@@ -4508,7 +4517,8 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
                      layout=layout,
                      # Where this pad's C and Z really are — taught,
                      # known, or assumed, in that order.
-                     src=n64_sources(pad) if layout == "n64" else None)
+                     src=n64_sources(pad) if layout == "n64" else None,
+                     raw=pad.raw if pad else ())
 
         if pad:
             label, lc = pad.label, FG
@@ -4694,6 +4704,27 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
 # forth.
 GC_SWAP_ON = 24000
 GC_SWAP_OFF = 8000
+
+
+def read_raw(sdl, pads):
+    """Every button the pad physically has, whether SDL names it or not.
+
+    SDL's gamepad mapping only covers the buttons it has a role for. A
+    Nintendo N64 Controller reports sixteen and the mapping names eleven, so
+    its C right — one of the five left out — produces no gamepad event at
+    all, however hard it is pressed. At the joystick level every button is
+    just a number, which is exactly what the mapping walk wants to record.
+    """
+    for pad in pads:
+        if not pad.handle:
+            continue
+        js = sdl.SDL_GameControllerGetJoystick(pad.handle)
+        if not js:
+            continue
+        if pad.raw_count is None:
+            pad.raw_count = sdl.SDL_JoystickNumButtons(js)
+        pad.raw = {i for i in range(pad.raw_count)
+                   if sdl.SDL_JoystickGetButton(js, i)}
 
 
 def read_axes(sdl, pads, logged):
@@ -5030,6 +5061,8 @@ def main():
             # has nothing left to buy.
 
             read_axes(sdl, pads, axes_logged)
+            if layout_for(backend) == "n64":
+                read_raw(sdl, pads)
             # No swap gesture on a map that cannot swap: a PlayStation pad's
             # shapes are positions, so the two triggers would flip a setting
             # with nothing to act on — and a pad carries that setting across
@@ -5106,16 +5139,23 @@ def main():
             # left them frozen at whatever they held when the walk started,
             # so Z and C-down could never have been learned.
             read_axes(sdl, pads, axes_logged)
+            read_raw(sdl, pads)
             step = MAP_STEPS_N64[mapping["step"]]
             got = None
-            for ax, value in pad.axes.items():
-                if abs(value) >= MAP_AXIS_ON:
-                    got = ["axis", ax, 1 if value > 0 else -1]
-                    break
+            # Raw buttons first: they cover everything the gamepad view
+            # covers and five more besides on this pad.
+            if pad.raw:
+                got = ["raw", min(pad.raw)]
+            if got is None:
+                for ax, value in pad.axes.items():
+                    if abs(value) >= MAP_AXIS_ON:
+                        got = ["axis", ax, 1 if value > 0 else -1]
+                        break
             if got and mapping.get("armed", True):
                 mapping["learned"][step[0]] = got
-                print(f"map: {step[1]} = axis {got[1]} {'+' if got[2] > 0 else '-'}",
-                      flush=True)
+                said = (f"button {got[1]}" if got[0] == "raw"
+                        else f"axis {got[1]} {'+' if got[2] > 0 else '-'}")
+                print(f"map: {step[1]} = {said}", flush=True)
                 mapping["step"] += 1
                 mapping["armed"] = False
                 last_sig = None
@@ -5171,11 +5211,9 @@ def main():
                     # button is which is the question being asked. Every
                     # press answers the step that is lit; the walk ends when
                     # it runs out of steps.
-                    step = MAP_STEPS_N64[mapping["step"]]
-                    mapping["learned"][step[0]] = ["button", btn]
-                    print(f"map: {step[1]} = button {btn}", flush=True)
-                    mapping["step"] += 1
-                    last_sig = None
+                    # Swallowed. Every answer comes from the raw poll
+                    # above, so a button that SDL happens to name does not
+                    # get recorded twice or, worse, differently.
                     continue
                 if presses_logged[0] < PRESS_LOG_LIMIT:
                     presses_logged[0] += 1
@@ -5272,7 +5310,11 @@ def main():
                 # Exit is available to every pad on purpose. Gating it to P1
                 # meant that if P1's controller slept, or someone else held
                 # it, nobody on the sofa could close the tool at all.
-                if btn == BTN_BACK:
+                # Not on a pad whose Back IS a C button. SDL calls button 4
+                # Back, and on a Nintendo N64 Controller button 4 is C up —
+                # so every press of C began counting down to quit. That pad
+                # quits with Z and Start, as the N64 legend says.
+                if btn == BTN_BACK and not native_n64(pad):
                     holding[(pad.key, BTN_BACK)] = now
                     continue
 
