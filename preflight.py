@@ -4704,20 +4704,6 @@ def main():
             alert = None
             if backend == "eden" and pads and steam_input_off(pads):
                 alert = "Turn Steam Input ON for this game \u2014 Eden gets no input without it"
-            # Say who we are still waiting on, by bay, rather than leaving
-            # the screen looking finished while the pads are anonymous. A
-            # pad only becomes itself when somebody presses a button on it,
-            # so the one thing worth showing is which one to press.
-            waiting = [p for p in pads
-                       if p.slot and p.real is None
-                       and (p.vendor, p.product) == STEAM_VIRTUAL]
-            spin = 0
-            if alert is None and waiting and reals.available:
-                spin = int(now / 400) % 4
-                who = ", ".join(f"P{p.slot}" for p in sorted(
-                    waiting, key=lambda q: q.slot))
-                alert = ("Identifying controllers" + "." * spin
-                         + f"  press any button on {who}")
             if backend is None:
                 warnings.append(f"No controller-config backend for "
                                 f"{target or 'this command'} — the check runs, "
@@ -4792,7 +4778,7 @@ def main():
                          for p in pads),
                    cycle.active,
                    tuple((k, tuple(sorted(v.items()))) for k, v in sorted(holds.items())),
-                   tuple(warnings), claimed_p1, alert, p1_pro, spin)
+                   tuple(warnings), claimed_p1, alert, p1_pro)
             if sig != last_sig:
                 last_sig = sig
                 draw_pad_grid(ui, pads, cycle, warnings, needed, holds,
