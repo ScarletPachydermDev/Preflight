@@ -167,7 +167,14 @@ def pad_wysiwyg(pad):
     Identity mapping is truthful on an Xbox-layout pad; the mirrored one is
     truthful on a Nintendo-layout pad. So the two agree exactly when the
     swap setting matches the layout.
+
+    Unless the player has calibrated the pad, in which case the setting was
+    derived from what they pressed and is truthful by construction — and
+    nintendo_layout, which is the guess calibration exists to overrule, has
+    no vote.
     """
+    if getattr(pad, "calibrated", False):
+        return True
     return bool(pad.swap_faces) == nintendo_layout(pad)
 
 # Nothing the user owns lives beside the code. SelfSteam embeds this project
@@ -547,6 +554,7 @@ class Pad:
         # pair without the other — so this is a single setting.
         self.swap_faces = False
         self.swap_explicit = False    # True once a player has asked for it
+        self.calibrated = False       # the layout was demonstrated, not guessed
 
     @property
     def store_key(self):
@@ -861,9 +869,19 @@ def apply_known(pads, known):
             # and "this was the default at the time". Only a deliberate choice
             # survives, so a pad whose layout we later learn about corrects
             # itself instead of staying wrong.
+            # A calibrated answer is trusted on a `crc:` key too. The rule
+            # against those exists because Steam parks pads in slots and the
+            # setting would land on the wrong controller — but a `crc:` key
+            # has proved stable per pad across sessions here, and more to the
+            # point this value is not a guess that might be wrong: a person
+            # looked at the controller in their hands and pressed what it
+            # says. If it ever does land on the wrong pad, the same twenty
+            # seconds corrects it.
+            calibrated = bool(rec.get("calibrated"))
             explicit = (rec.get("schema", 0) >= 4
                         and bool(rec.get("swap_explicit"))
-                        and is_hardware_key(p.store_key))
+                        and (calibrated or is_hardware_key(p.store_key)))
+            p.calibrated = calibrated
             p.swap_explicit = explicit
             p.swap_faces = (bool(rec.get("swap_faces")) if explicit
                             else default_swap(p))
@@ -887,8 +905,13 @@ def remember(pads, known):
                 # Only recorded against real hardware. Saving it under a
                 # virtual-pad slot would hand the setting to whichever
                 # controller Steam parks there next time.
-                "swap_faces": p.swap_faces if is_hardware_key(p.store_key) else False,
+                "swap_faces": (p.swap_faces
+                               if getattr(p, "calibrated", False)
+                               or is_hardware_key(p.store_key) else False),
                 "swap_explicit": bool(getattr(p, "swap_explicit", False)),
+                # Set by the player, in the calibration screen. See
+                # apply_known for why this one outranks the key rule.
+                "calibrated": bool(getattr(p, "calibrated", False)),
                 # Recorded for the log only. It is never read back: it used
                 # to be, and against a `crc:` slot key it handed one pad's
                 # identity to whoever Steam parked there next.
@@ -2158,8 +2181,12 @@ def duck_pad_rows(pad, player):
     """One [PadN] section: a DualShock wired to this pad."""
     # By position, which on a Nintendo-lettered pad means the other way
     # round from SDL's letters — see DUCK_FACE_NINTENDO.
-    face = (DUCK_FACE_NINTENDO if steam_relabelled(pad)
-            else DUCK_FACE_IDENTITY)
+    # A calibrated pad answers this itself. Everything else is still the
+    # old inference, unchanged — calibration overrules a guess, it does not
+    # replace the guess for pads nobody has had to correct.
+    mirrored = (bool(pad.swap_faces) if getattr(pad, "calibrated", False)
+                else steam_relabelled(pad))
+    face = DUCK_FACE_NINTENDO if mirrored else DUCK_FACE_IDENTITY
     buttons = dict(DUCK_BUTTON, **face)
     rows = [("Type", "AnalogController")]
     for role, key in DUCK_KEYS.items():
@@ -4339,7 +4366,54 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
             items.insert(3, (["+", "sep+", "\u2013"], "P1", p1c,
                              "is a Wii U Pro Controller" if wiiu == "pro"
                              else "is a Wii U GamePad"))
+    # Offered on every map, including PlayStation. There is no swap gesture
+    # there because the shapes are positions — but which letters this pad has
+    # still decides which shape each button writes, so it is exactly the
+    # screen where a wrong guess is least visible and most annoying.
+    items.append((["Y"], None, anyone, "hold to fix my buttons"))
     glyph_bar(ui, items, hidden={1} if p1_claimed else ())
+
+
+# ---------------------------------------------------------------- calibrate
+
+# What the player is asked to press, in order. Two is enough to decide the
+# question and to catch a misread: on any pad with letters, the button marked
+# A and the button marked B sit on opposite sides of the diamond, so one of
+# them lands on SDL's south and the other on SDL's east. Which way round is
+# the whole answer.
+CAL_STEPS = ("A", "B")
+
+
+def calibration_verdict(got):
+    """(swap_faces, complaint) for what the player actually pressed.
+
+    Returns None for swap when the two presses do not describe a pad — the
+    honest outcome of a fumbled button is to ask again, not to record a
+    layout nobody demonstrated.
+    """
+    a, b = got.get("A"), got.get("B")
+    if {a, b} != {BTN_A, BTN_B}:
+        return None, "That was not the A and B buttons — let us try again."
+    # SDL's BTN_A is the south position and BTN_B the east one, whatever the
+    # pad has printed there. A pad whose printed A sits on east is a
+    # Nintendo-lettered pad, and it is the one that needs the mirror.
+    return a == BTN_B, None
+
+
+def calibrate_screen(ui, pad, letter, complaint, step, total):
+    draw_frame(ui, "Which buttons are which?",
+               f"Bay {pad.slot or '-'} \u2014 {pad.display}")
+    y = int(ui.h * 0.32)
+    ui.text("On this controller, press the button marked",
+            int(ui.w * 0.05), y, "body", DIM)
+    y += ui.size["body"] + 18
+    ui.text(letter, int(ui.w * 0.05), y, "huge", ACCENT)
+    y += ui.size["huge"] + 24
+    ui.text(f"{step} of {total}", int(ui.w * 0.05), y, "small", DIM)
+    if complaint:
+        y += ui.size["small"] + 18
+        ui.text(complaint, int(ui.w * 0.05), y, "body", BAD)
+    draw_hint(ui, "Back = cancel")
 
 
 def message_screen(ui, title, lines, color=BAD):
@@ -4614,6 +4688,7 @@ def main():
     log_layouts(pads)
 
     state = "roster"
+    cal = None               # the calibration in progress, if any
     claimed_p1 = None       # key of the pad that took P1; one claim per session
     last_sig = None         # what was last painted, so we can skip redraws
     result = None
@@ -4725,6 +4800,15 @@ def main():
                     holding.pop((pkey, btn), None)
                     if btn == BTN_BACK:
                         state = "exit"
+                    elif btn == BTN_Y:
+                        # Any pad may correct itself: the one Steam has
+                        # mislabelled is rarely the one in bay one.
+                        target = next((q for q in pads if q.key == pkey), None)
+                        if target is not None:
+                            cal = {"key": pkey, "step": 0, "got": {},
+                                   "complaint": None}
+                            state = "calibrate"
+                            last_sig = None
                     elif btn == BTN_START:
                         state = "commit"
 
@@ -4745,6 +4829,20 @@ def main():
                               layout=layout_for(backend),
                               wiiu=("pro" if p1_pro else "gamepad")
                               if backend == "cemu" else None)
+                ui.present()
+
+        elif state == "calibrate":
+            pad = next((q for q in pads if q.key == cal["key"]), None)
+            if pad is None:          # the pad went to sleep mid-question
+                cal, state = None, "roster"
+                last_sig = None
+                continue
+            sig = ("calibrate", cal["step"], cal["complaint"])
+            if sig != last_sig:
+                last_sig = sig
+                calibrate_screen(ui, pad, CAL_STEPS[cal["step"]],
+                                 cal["complaint"], cal["step"] + 1,
+                                 len(CAL_STEPS))
                 ui.present()
 
         elif state == "error":
@@ -4776,6 +4874,41 @@ def main():
                 if pad is None:
                     continue
                 pad.held.add(btn)
+                if state == "calibrate":
+                    # Only the pad being asked, and only its face buttons:
+                    # a sibling mashing another controller must not answer
+                    # this question.
+                    if pad.key != cal["key"]:
+                        continue
+                    if btn == BTN_BACK:
+                        cal, state = None, "roster"
+                        last_sig = None
+                        continue
+                    if btn not in (BTN_A, BTN_B, BTN_X, BTN_Y):
+                        continue
+                    cal["got"][CAL_STEPS[cal["step"]]] = btn
+                    cal["complaint"] = None
+                    cal["step"] += 1
+                    if cal["step"] < len(CAL_STEPS):
+                        last_sig = None
+                        continue
+                    swap, complaint = calibration_verdict(cal["got"])
+                    if complaint:
+                        cal.update(step=0, got={}, complaint=complaint)
+                        last_sig = None
+                        continue
+                    pad.swap_faces = swap
+                    pad.swap_explicit = True
+                    pad.calibrated = True
+                    print(f"calibrate: P{pad.slot} {pad.display} is a "
+                          f"{'Nintendo' if swap else 'Xbox'}-lettered pad "
+                          f"(printed A reported "
+                          f"{BUTTON_NAMES.get(cal['got']['A'], '?')})",
+                          flush=True)
+                    remember(pads, known)
+                    cal, state = None, "roster"
+                    last_sig = None
+                    continue
                 if presses_logged[0] < PRESS_LOG_LIMIT:
                     presses_logged[0] += 1
                     print(f"press: P{pad.slot or '-'} btn={btn} "
@@ -4818,7 +4951,13 @@ def main():
                         # gap would otherwise convict it. The watcher
                         # re-scans every second.
                         settled = now - pad.silent_since >= 2 * reals.REFRESH_MS
-                        if (pad.silent_presses >= 3 and settled
+                        # And only once the watcher has proved it can see
+                        # anything at all. On a run where it read nothing
+                        # from any node this convicted whichever pad was
+                        # pressed first — "no device fired" means nothing
+                        # when no device ever fires.
+                        works = any(q.real for q in pads)
+                        if (pad.silent_presses >= 3 and settled and works
                                 and not pad.no_kernel_node):
                             pad.no_kernel_node = True
                             print(f"pair: P{pad.slot or '-'} {pad.display} has "
@@ -4873,6 +5012,13 @@ def main():
                 # it, nobody on the sofa could close the tool at all.
                 if btn == BTN_BACK:
                     holding[(pad.key, BTN_BACK)] = now
+                    continue
+
+                # Hold Y to say "these labels are wrong". Held rather than
+                # tapped for the same reason as the others: everyone mashes
+                # every button on this screen to test it.
+                if btn == BTN_Y and pad.slot:
+                    holding[(pad.key, BTN_Y)] = now
                     continue
 
                 if pad.slot != 1:
