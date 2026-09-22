@@ -2431,11 +2431,20 @@ GOPHER_NATIVE_N64 = dict(
     # the left one free for a Steam Input C-shift, which a pad with real C
     # buttons has no use for.
     z=_axis(4, 1),
-    # Real C buttons, and not a stick: three buttons and one axis, in the
-    # order SDL gives them.
-    c_up=_button(3), c_left=_button(2), c_right=_button(4),
-    c_down=_axis(5, 1),
-    # Button 4 is C Right on this pad, so the hotkey moves to Share.
+    # Real C buttons, and not a stick — in GOPHER64's numbering, which is
+    # not the one preflight's own screen uses. The check screen reads SDL2's
+    # gamepad buttons, where this cluster is 2, 3, 4 = left, up, right.
+    # gopher64 counts them 2, 3, 4, 5 = down, left, up, right. Same four
+    # buttons, two schemes, and writing one into the other is what left the
+    # screen correct and the game a quarter-turn out.
+    #
+    # Derived from play: with C left written as 2, pressing C DOWN fired the
+    # game's C left; with C up written as 3, pressing C LEFT fired C up;
+    # with C right written as 4, pressing C UP fired C right. C right is the
+    # one left over, and is the only one of the four not confirmed by a
+    # press.
+    c_down=_button(2), c_left=_button(3), c_up=_button(4),
+    c_right=_button(5),
     hotkey=_button(15),
 )
 GOPHER_NATIVE_N64_MIRRORED = dict(GOPHER_NATIVE_N64,
