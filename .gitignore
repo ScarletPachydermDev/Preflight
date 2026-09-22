@@ -13,3 +13,7 @@ __pycache__/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Local controller-identification bench, deliberately not shipped.
+tools/training.py
+tools/training.log

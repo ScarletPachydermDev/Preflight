@@ -84,39 +84,6 @@ NINTENDO_VENDORS = (0x057E, 0x2DC8)
 NINTENDO_VENDOR = 0x057E
 
 
-def is_steam_controller(pad):
-    """A Steam Controller, which Steam holds at hidraw level.
-
-    It has no kernel device node, so it can never be paired to one — and a
-    pairing is how every other virtual pad learns what hardware it is.
-
-    The name is worthless here. Steam calls the same pad "Steam Controller"
-    on one run and "Microsoft X-Box 360 pad 0" on the next, and it does not
-    even keep the names with the right pads: a run with three pads showed
-    the Xbox one as "Steam Controller", the Steam Controller as "8BitDo
-    SN30 Pro" and the 8bitdo as "Xbox One controller" — every name present
-    and every one on the wrong pad.
-
-    Remembering the answer was worse. It was stored against the pad's
-    store_key, which for a virtual pad is a `crc:` SLOT — and Steam reparks
-    controllers between slots, so "this one is a Steam Controller" landed on
-    whichever pad held that slot next, and blocked it from ever pairing.
-    See is_hardware_key, which every other remembered field respects.
-
-    So the answer comes from evidence instead: a Steam Controller is held at
-    hidraw level and has no kernel node, so pressing it moves nothing the
-    watcher can see. A pad that has been pressed several times with no real
-    device firing alongside is that pad. This decides itself during the run
-    and cannot be inherited by anyone else.
-    """
-    if getattr(pad, "no_kernel_node", False):
-        return True
-    for name in (getattr(pad, "gc_name", None), getattr(pad, "name", None)):
-        if name and "steam controller" in name.lower():
-            return True
-    return False
-
-
 def steam_relabelled(pad):
     """True when this pad's SDL letters are LABELS rather than positions.
 
@@ -539,10 +506,6 @@ class Pad:
         self.axes = {}            # axis id -> raw -32768..32767
         self.display = None       # filled in by label_pads()
         self.real = None          # the physical device behind a virtual pad
-        # Pressed with no real device stirring — see is_steam_controller.
-        self.no_kernel_node = False
-        self.silent_presses = 0
-        self.silent_since = None
         # A/B and X/Y always move together — no real controller mirrors one
         # pair without the other — so this is a single setting.
         self.swap_faces = False
@@ -651,6 +614,73 @@ def scan_real_gamepads():
     return out
 
 
+def dev_ident(info):
+    """What makes two watched nodes the same controller.
+
+    A pad is now watched twice — its evdev node and its hidraw node — so a
+    path no longer identifies it. Claiming one must claim both, or the same
+    controller is handed to two pads.
+    """
+    return (info.get("vendor"), info.get("product"), info.get("mac"))
+
+
+def scan_hid_gamepads():
+    """The physical controllers as HID devices, read through hidraw.
+
+    The evdev route does not work under Steam Input. Steam takes a pad over
+    at the HID level, and its kernel event node then exists but never fires:
+    measured on this hardware with every button on two pads being pressed
+    and not one event arriving. Pairing by evdev therefore never succeeded
+    once, and what looked like success was pair_by_elimination guessing.
+
+    hidraw still carries the reports, because it does not hand a device to
+    one reader exclusively — Steam reads it and so can we. A press shows up
+    as a CHANGE in the report: an idle pad streams the same bytes over and
+    over, so arrival alone means nothing.
+    """
+    import glob
+    out = []
+    for base in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
+        node = os.path.basename(base)
+        dev = f"{base}/device"
+        uevent = sysfs_read(f"{dev}/uevent")
+        fields = dict(l.split("=", 1) for l in uevent.splitlines() if "=" in l)
+        # HID_ID is bus:vendor:product, all hex and zero-padded.
+        parts = (fields.get("HID_ID") or "").split(":")
+        if len(parts) != 3:
+            continue
+        try:
+            ven, prod = int(parts[1], 16), int(parts[2], 16)
+        except ValueError:
+            continue
+        # Only pads. The same BTN_SOUTH test as the evdev scan, applied to
+        # whichever input devices this HID device brought with it — a
+        # keyboard's hidraw node would otherwise be watched for presses.
+        mac, is_pad = None, False
+        for inp in sorted(glob.glob(f"{dev}/input/input*")):
+            caps = sysfs_read(f"{inp}/capabilities/key")
+            if caps and _has_south(caps):
+                is_pad = True
+                mac = (sysfs_read(f"{inp}/uniq") or "").lower() or mac
+        if not is_pad:
+            continue
+        out.append({"path": f"/dev/{node}",
+                    "name": fields.get("HID_NAME") or node,
+                    "mac": mac, "vendor": ven, "product": prod,
+                    "hid": True})
+    return out
+
+
+def _has_south(caps):
+    """True when a capabilities/key bitmap has BTN_SOUTH, marking a gamepad."""
+    words = caps.split()[::-1]              # sysfs prints MSB group first
+    idx, off = 0x130 // 64, 0x130 % 64
+    try:
+        return idx < len(words) and bool(int(words[idx], 16) >> off & 1)
+    except ValueError:
+        return False
+
+
 class RealWatcher:
     """Correlates presses on the hidden physical pads with the virtual ones.
 
@@ -678,6 +708,7 @@ class RealWatcher:
 
     def __init__(self):
         self.fds = {}
+        self.last = {}           # hidraw baseline report, per fd
         self.recent = []
         self.available = False
         self.last_refresh = 0
@@ -695,7 +726,10 @@ class RealWatcher:
         that cannot be remembered.
         """
         known = {info["path"] for info in self.fds.values()}
-        for info in scan_real_gamepads():
+        # Both channels. evdev is the one that carries a MAC and works for a
+        # pad Steam has not taken over; hidraw is the only one that carries
+        # anything at all for a pad it has. See scan_hid_gamepads.
+        for info in list(scan_real_gamepads()) + list(scan_hid_gamepads()):
             if info["path"] in known:
                 continue
             try:
@@ -725,14 +759,24 @@ class RealWatcher:
         except (OSError, ValueError):
             return
         for fd in ready:
+            info = self.fds[fd]
             try:
-                data = os.read(fd, 24 * 64)
+                data = os.read(fd, 256 if info.get("hid") else 24 * 64)
             except OSError:
+                continue
+            if info.get("hid"):
+                # An idle pad streams the same report forever, so arrival
+                # says nothing; a press changes the bytes. The first report
+                # only establishes the baseline.
+                was = self.last.get(fd)
+                self.last[fd] = data
+                if was is not None and data != was:
+                    self.recent.append((now, info))
                 continue
             for off in range(0, len(data) - 23, 24):
                 _, _, etype, _, value = struct.unpack_from("qqHHi", data, off)
                 if etype == 1 and value == 1:       # EV_KEY press
-                    self.recent.append((now, self.fds[fd]))
+                    self.recent.append((now, info))
         self.recent = [(t, i) for t, i in self.recent
                        if now - t <= self.WINDOW_MS]
 
@@ -743,11 +787,11 @@ class RealWatcher:
         guess, so that case is skipped rather than risking a wrong label.
         """
         hits = [i for t, i in self.recent
-                if now - t <= self.CLAIM_MS and i["path"] not in taken]
+                if now - t <= self.CLAIM_MS and dev_ident(i) not in taken]
         if not hits:
             return None
-        paths = {i["path"] for i in hits}
-        return hits[-1] if len(paths) == 1 else None
+        who = {dev_ident(i) for i in hits}
+        return hits[-1] if len(who) == 1 else None
 
     def spare_devices(self, pads, sdl_pads):
         """Real devices that no pad here accounts for.
@@ -756,13 +800,14 @@ class RealWatcher:
         node — it is not spare. What is left is hardware driving something
         else: under Steam, a virtual pad.
         """
-        taken = {p.real["path"] for p in pads if p.real}
+        taken = {dev_ident(p.real) for p in pads if p.real}
         seen = {(p.vendor, p.product) for p in sdl_pads
                 if (p.vendor, p.product) != STEAM_VIRTUAL}
-        out = []
+        out, listed = [], set()
         for info in self.fds.values():
-            if info["path"] in taken:
+            if dev_ident(info) in taken or dev_ident(info) in listed:
                 continue
+            listed.add(dev_ident(info))
             if (info["vendor"], info["product"]) in seen:
                 continue
             out.append(info)
@@ -794,6 +839,7 @@ class RealWatcher:
             except OSError:
                 pass
         self.fds.clear()
+        self.last.clear()
 
 
 def scan_pads(sdl):
@@ -900,7 +946,6 @@ def remember(pads, known):
                 # Recorded for the log only. It is never read back: it used
                 # to be, and against a `crc:` slot key it handed one pad's
                 # identity to whoever Steam parked there next.
-                "steam_controller_seen": is_steam_controller(p),
                 "last_seen": time.strftime("%Y-%m-%dT%H:%M:%S"),
             }
     save_known(known)
@@ -952,32 +997,6 @@ class RumbleCycle:
 
 def new_slot_state():
     return {"order": {}, "seq": 0, "present": set()}
-
-
-def pair_by_elimination(pads, reals):
-    """Identify a pad that cannot identify itself, when only one answer fits.
-
-    Pairing normally correlates a press on the virtual pad with a press on
-    the real device. That fails when the device's node is silent — a pad
-    Steam drives over hidraw, for instance — and it fails silently, leaving
-    the pad unidentified and its face buttons a guess.
-
-    But identity is sometimes deducible without any press at all: if exactly
-    one pad here is unidentified and exactly one real device is unaccounted
-    for, there is only one way round they can go. The same reasoning the
-    gopher64 backend uses for its ports, and the same caution: only when the
-    counts leave no choice. A Steam Controller is excluded from both sides,
-    having no node of its own to be matched with.
-    """
-    strangers = [p for p in pads
-                 if p.slot and p.real is None and not is_steam_controller(p)
-                 and (p.vendor, p.product) == STEAM_VIRTUAL]
-    if len(strangers) != 1:
-        return None
-    spare = reals.spare_devices(pads, pads)
-    if len(spare) != 1:
-        return None
-    return strangers[0], spare[0]
 
 
 def bind_real(pad, info, known, pads):
@@ -4683,6 +4702,20 @@ def main():
             alert = None
             if backend == "eden" and pads and steam_input_off(pads):
                 alert = "Turn Steam Input ON for this game \u2014 Eden gets no input without it"
+            # Say who we are still waiting on, by bay, rather than leaving
+            # the screen looking finished while the pads are anonymous. A
+            # pad only becomes itself when somebody presses a button on it,
+            # so the one thing worth showing is which one to press.
+            waiting = [p for p in pads
+                       if p.slot and p.real is None
+                       and (p.vendor, p.product) == STEAM_VIRTUAL]
+            spin = 0
+            if alert is None and waiting and reals.available:
+                spin = int(now / 400) % 4
+                who = ", ".join(f"P{p.slot}" for p in sorted(
+                    waiting, key=lambda q: q.slot))
+                alert = ("Identifying controllers" + "." * spin
+                         + f"  press any button on {who}")
             if backend is None:
                 warnings.append(f"No controller-config backend for "
                                 f"{target or 'this command'} — the check runs, "
@@ -4711,15 +4744,14 @@ def main():
                 warnings.append("No controllers detected. Wake one and it "
                                 "will appear here.")
 
-            deduced = pair_by_elimination(pads, reals)
-            if deduced:
-                pad_, info = deduced
-                print(f"pair: {pad_.display} must be {info['name']} "
-                      f"[{info['vendor']:04x}:{info['product']:04x}] — "
-                      f"nothing else is unaccounted for", flush=True)
-                bind_real(pad_, info, known, pads)
-                label_pads(pads)
-                log_layouts(pads)
+            # pair_by_elimination is gone. It fired before anyone had
+            # pressed anything and bound the one unidentified pad to the one
+            # unaccounted-for device — which is only sound if both counts
+            # are right, and they were not: it bound an 8bitdo's pad to an
+            # Xbox controller on one run and the other way round on the
+            # next, crossing the labels and the face mapping with them.
+            # A press on hidraw now identifies a pad properly, so a guess
+            # has nothing left to buy.
 
             read_axes(sdl, pads, axes_logged)
             # No swap gesture on a map that cannot swap: a PlayStation pad's
@@ -4760,7 +4792,7 @@ def main():
                          for p in pads),
                    cycle.active,
                    tuple((k, tuple(sorted(v.items()))) for k, v in sorted(holds.items())),
-                   tuple(warnings), claimed_p1, alert, p1_pro)
+                   tuple(warnings), claimed_p1, alert, p1_pro, spin)
             if sig != last_sig:
                 last_sig = sig
                 draw_pad_grid(ui, pads, cycle, warnings, needed, holds,
@@ -4819,44 +4851,34 @@ def main():
                 # a second and cannot mis-pair.
                 quiet = all(t is None or now - t > reals.WINDOW_MS
                             for k, t in last_press.items() if k != pad.key)
-                if (pad.real is None and not is_steam_controller(pad)
+                # No Steam Controller exception any more. That guard existed
+                # because Steam holds it at hidraw level and it has no
+                # working kernel node — but hidraw is now the channel
+                # pairing reads, so it identifies itself like anything else.
+                if (pad.real is None
                         and quiet
                         and (pad.vendor, pad.product) == STEAM_VIRTUAL):
-                    taken = {q.real["path"] for q in pads if q.real}
+                    taken = {dev_ident(q.real) for q in pads if q.real}
                     hit = reals.claim(now, taken)
                     if hit:
                         bind_real(pad, hit, known, pads)
-                    elif reals.available and not reals.recent:
-                        # Pressed, and not one real device stirred. Nothing
-                        # with a kernel node behaves like this; a Steam
-                        # Controller, held at hidraw, always does. Three in
-                        # a row is the answer, and it stops this pad from
-                        # taking hardware that belongs to someone else.
-                        pad.silent_presses += 1
-                        if pad.silent_since is None:
-                            pad.silent_since = now
-                        # Spread over time as well as counted: a pad that
-                        # has just reconnected has a node the watcher has
-                        # not opened yet, and three fast presses inside that
-                        # gap would otherwise convict it. The watcher
-                        # re-scans every second.
-                        settled = now - pad.silent_since >= 2 * reals.REFRESH_MS
-                        if (pad.silent_presses >= 3 and settled
-                                and not pad.no_kernel_node):
-                            pad.no_kernel_node = True
-                            print(f"pair: P{pad.slot or '-'} {pad.display} has "
-                                  f"no kernel node — treating it as a Steam "
-                                  f"Controller", flush=True)
                     if not hit and pairing_logged[0] < 12:
                         # Say when a press went by without identifying the
                         # pad: silence here reads as "nothing to see", and
                         # what it actually means is that this pad's face
                         # buttons are about to be a guess.
                         pairing_logged[0] += 1
+                        # Name the devices that stirred, not just how many.
+                        # Zero means the channel is dead for this pad; more
+                        # than one means something is chattering on its own
+                        # — a drifting stick reports for ever — and that is
+                        # the difference between "cannot see it" and "cannot
+                        # tell them apart".
+                        stirring = ", ".join(sorted(
+                            {i["name"] for _, i in reals.recent})) or "nothing"
                         print(f"pair: no device matched P{pad.slot or '-'} "
-                              f"{pad.display} ({len(reals.recent)} recent "
-                              f"event(s), {len(taken)} already claimed)",
-                              flush=True)
+                              f"{pad.display} (stirring: {stirring}; "
+                              f"{len(taken)} already claimed)", flush=True)
                 last_press[pad.key] = now
 
                 if state == "error":
