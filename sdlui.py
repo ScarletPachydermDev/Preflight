@@ -292,6 +292,9 @@ def _bind(sdl, ttf):
     # has a role for: a Nintendo N64 Controller has sixteen and the mapping
     # names eleven, so C right — one of the five it leaves out — is invisible
     # through the gamepad API however hard it is pressed.
+    sdl.SDL_JoystickNumHats.argtypes, sdl.SDL_JoystickNumHats.restype = [vp], ci
+    sdl.SDL_JoystickGetHat.argtypes = [vp, ci]
+    sdl.SDL_JoystickGetHat.restype = ctypes.c_ubyte
     sdl.SDL_JoystickNumButtons.argtypes = [vp]
     sdl.SDL_JoystickNumButtons.restype = ci
     sdl.SDL_JoystickGetButton.argtypes = [vp, ci]

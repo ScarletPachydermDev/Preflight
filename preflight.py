@@ -528,7 +528,9 @@ class Pad:
         self.display = None       # filled in by label_pads()
         self.real = None          # the physical device behind a virtual pad
         self.raw = set()          # raw joystick buttons down — see read_raw
+        self.hats = {}            # raw hat positions, for a d-pad
         self.raw_count = None
+        self.hat_count = 0
         # A/B and X/Y always move together — no real controller mirrors one
         # pair without the other — so this is a single setting.
         self.swap_faces = False
@@ -4723,8 +4725,13 @@ def read_raw(sdl, pads):
             continue
         if pad.raw_count is None:
             pad.raw_count = sdl.SDL_JoystickNumButtons(js)
+            pad.hat_count = sdl.SDL_JoystickNumHats(js)
         pad.raw = {i for i in range(pad.raw_count)
                    if sdl.SDL_JoystickGetButton(js, i)}
+        # A d-pad is usually a hat rather than four buttons, so it never
+        # appears among the buttons above however hard it is pressed.
+        pad.hats = {i: sdl.SDL_JoystickGetHat(js, i)
+                    for i in range(pad.hat_count)}
 
 
 def read_axes(sdl, pads, logged):
@@ -5142,24 +5149,41 @@ def main():
             read_raw(sdl, pads)
             step = MAP_STEPS_N64[mapping["step"]]
             got = None
-            # Raw buttons first: they cover everything the gamepad view
-            # covers and five more besides on this pad.
-            if pad.raw:
-                got = ["raw", min(pad.raw)]
+            # What is NEWLY down, never what merely is. Recording the lowest
+            # button currently held meant anything still held from the last
+            # step answered the next one too, so C up and C right came back
+            # as the same button.
+            was_raw = mapping.get("was_raw", set())
+            was_hats = mapping.get("was_hats", {})
+            fresh = pad.raw - was_raw
+            if fresh:
+                got = ["raw", min(fresh)]
+            if got is None:
+                # A d-pad is a hat, so it is in neither the buttons nor the
+                # axes. Its direction is a bitmask; a press is any bit that
+                # was not set a moment ago.
+                for i, value in pad.hats.items():
+                    new_bits = value & ~was_hats.get(i, 0)
+                    if new_bits:
+                        got = ["hat", i, new_bits]
+                        break
             if got is None:
                 for ax, value in pad.axes.items():
                     if abs(value) >= MAP_AXIS_ON:
                         got = ["axis", ax, 1 if value > 0 else -1]
                         break
+            mapping["was_raw"] = set(pad.raw)
+            mapping["was_hats"] = dict(pad.hats)
             if got and mapping.get("armed", True):
                 mapping["learned"][step[0]] = got
                 said = (f"button {got[1]}" if got[0] == "raw"
+                        else f"hat {got[1]} bits {got[2]}" if got[0] == "hat"
                         else f"axis {got[1]} {'+' if got[2] > 0 else '-'}")
                 print(f"map: {step[1]} = {said}", flush=True)
                 mapping["step"] += 1
                 mapping["armed"] = False
                 last_sig = None
-            elif not got:
+            elif not got and not pad.raw and not any(pad.hats.values()):
                 # Rearm once everything is back at rest, so one long push
                 # cannot answer two questions.
                 mapping["armed"] = True
