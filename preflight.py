@@ -2431,25 +2431,17 @@ GOPHER_NATIVE_N64 = dict(
     # the left one free for a Steam Input C-shift, which a pad with real C
     # buttons has no use for.
     z=_axis(4, 1),
-    # Real C buttons, and not a stick — in GOPHER64's numbering, which is
-    # not the one preflight's own screen uses. The check screen reads SDL2's
-    # gamepad buttons, where this cluster is 2, 3, 4 = left, up, right.
-    # gopher64 counts them 2, 3, 4, 5 = down, left, up, right. Same four
-    # buttons, two schemes, and writing one into the other is what left the
-    # screen correct and the game a quarter-turn out.
+    # Real C buttons, and not a stick. MEASURED: pressing C right alone,
+    # ten times, logged joystick button 4 and gamepad button 4 every time.
+    # This pad's raw and gamepad numbers coincide here, so there is one
+    # scheme, not two.
     #
-    # Derived from play: with C left written as 2, pressing C DOWN fired the
-    # game's C left; with C up written as 3, pressing C LEFT fired C up;
-    # with C right written as 4, pressing C UP fired C right. C right is the
-    # one left over, and is the only one of the four not confirmed by a
-    # press.
-    # C right is not a button on this pad: pressing it moves AXIS 5 to full
-    # travel, which is why no ControllerButton id ever reached it and three
-    # separate guesses at a number all did nothing. Caught by logging every
-    # raw button on the check screen and finding only three for four
-    # presses, with an axis event alongside.
-    c_down=_button(2), c_left=_button(3), c_up=_button(4),
-    c_right=_axis(5, 1),
+    # These four were shifted once, on a reading of play that had C left
+    # firing the game's C up and so on. That could not be reconciled with a
+    # direct measurement repeated ten times, and a measurement of one button
+    # pressed alone beats an impression of four pressed in sequence.
+    c_up=_button(3), c_left=_button(2), c_right=_button(4),
+    c_down=_axis(5, 1),
     hotkey=_button(15),
 )
 GOPHER_NATIVE_N64_MIRRORED = dict(GOPHER_NATIVE_N64,
@@ -2618,20 +2610,12 @@ def gopher_entry(pad, template):
                  else GOPHER_NATIVE_N64)
     else:
         table = GOPHER_MIRRORED if pad.swap_faces else GOPHER_IDENTITY
-    # Anything the player taught preflight overrides the table — EXCEPT on a
-    # pad gopher64 numbers differently from us, which is every real N64
-    # controller. The walk measures what preflight's SDL2 reports; gopher64
-    # reads the same pad through its own SDL3 and gets other numbers. On
-    # this controller the C cluster is 2, 3, 4 = left, up, right with C down
-    # on an axis here, and 2, 3, 4, 5 = down, left, up, right there. Writing
-    # the measured numbers into gopher64's config put C back a quarter-turn
-    # out, undoing the table derived from actually playing the game.
-    #
-    # The learned map still rules the check screen, which is preflight's own
-    # SDL and where it was measured.
+    # Anything the player taught preflight on the mapping screen overrides
+    # the table, here as on the check screen. This was disabled for a while
+    # on the belief that gopher64 numbered these pads differently; it does
+    # not, and the mapping screen's answers match what pressing the buttons
+    # one at a time reports.
     table = dict(table)
-    if native_n64(pad):
-        learned = {}
     for role, got in learned.items():
         if role not in table or not got:
             continue
