@@ -2397,6 +2397,52 @@ GOPHER_IDENTITY = {
 # nothing else. Same gesture, same meaning as the other maps.
 GOPHER_MIRRORED = dict(GOPHER_IDENTITY, a=_button(1), b=_button(0))
 
+# A REAL N64 controller, where none of the above applies.
+#
+# The table above maps N64 roles onto a modern pad: C on the right stick, Z
+# on a trigger, A and B on the face buttons. A Nintendo Switch Online N64
+# Controller is not a modern pad wearing N64 names, it is an N64 controller,
+# and SDL reports its buttons where its own hardware puts them — C spread
+# across three buttons and an axis, Z on the LEFT trigger. Played through
+# the generic table every input is wrong, which is exactly what happened.
+#
+# These numbers are RetroArch's, from sdl2/Nintendo N64 Controller.cfg in
+# libretro/retroarch-joypad-autoconfig (MIT), whose vendor and product are
+# this pad's exactly. RetroArch plays this controller correctly out of the
+# box because it ships that file; this is the same knowledge, applied to
+# gopher64.
+NATIVE_N64 = {(0x057E, 0x2019)}
+
+GOPHER_NATIVE_N64 = dict(
+    GOPHER_IDENTITY,
+    # A sits east on an N64 pad and B beside it, which is where SDL reports
+    # them — the reverse of the generic table's assumption.
+    a=_button(1), b=_button(0),
+    # Z is the LEFT trigger here. The generic table moves it right to leave
+    # the left one free for a Steam Input C-shift, which a pad with real C
+    # buttons has no use for.
+    z=_axis(4, 1),
+    # Real C buttons, and not a stick: three buttons and one axis, in the
+    # order SDL gives them.
+    c_up=_button(3), c_left=_button(2), c_right=_button(4),
+    c_down=_axis(5, 1),
+    # Button 4 is C Right on this pad, so the hotkey moves to Share.
+    hotkey=_button(15),
+)
+GOPHER_NATIVE_N64_MIRRORED = dict(GOPHER_NATIVE_N64,
+                                  a=_button(0), b=_button(1))
+
+
+def native_n64(pad):
+    """True for a controller that IS an N64 pad rather than standing in for one.
+
+    Read from the paired hardware: the virtual pad Steam offers says only
+    Valve. A pad nobody has identified gets the generic table, which is the
+    right default — almost every pad playing an N64 game is a modern one.
+    """
+    real = getattr(pad, "real", None) or {}
+    return (real.get("vendor"), real.get("product")) in NATIVE_N64
+
 
 def gopher_profile_name(slot):
     return f"preflight-p{slot}"
@@ -2508,7 +2554,11 @@ def find_gopher_config(app_id=None, exe=None):
 def gopher_entry(pad, template):
     """One input profile for this pad: gopher64's own keyboard half kept,
     the controller half written from scratch."""
-    table = GOPHER_MIRRORED if pad.swap_faces else GOPHER_IDENTITY
+    if native_n64(pad):
+        table = (GOPHER_NATIVE_N64_MIRRORED if pad.swap_faces
+                 else GOPHER_NATIVE_N64)
+    else:
+        table = GOPHER_MIRRORED if pad.swap_faces else GOPHER_IDENTITY
     rows = []
     for i, role in enumerate(GOPHER_SLOTS):
         pair = None
