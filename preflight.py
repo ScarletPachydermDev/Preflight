@@ -728,6 +728,12 @@ class RealWatcher:
     # between reports from a pad that streams.
     HID_IDLE_MS = 400
 
+    # Consecutive sub-threshold changes before a device is called a
+    # chatterer. At the 17ms seen on an N64 pad this is about a third of a
+    # second of continuous reporting; no sequence of real presses looks
+    # like that.
+    HID_CHATTER_RUN = 20
+
     def __init__(self):
         self.fds = {}
         self.last = {}           # hidraw baseline report, per fd
@@ -736,10 +742,10 @@ class RealWatcher:
         self.available = False
         self.last_refresh = 0
 
-    def open(self):
-        return self.refresh()
+    def open(self, now=0):
+        return self.refresh(now)
 
-    def refresh(self):
+    def refresh(self, now=0):
         """Re-check which real nodes exist and open any new ones.
 
         Sampling once at startup was wrong: the tool deliberately does not
@@ -756,9 +762,15 @@ class RealWatcher:
             if info["path"] in known:
                 continue
             try:
-                self.fds[os.open(info["path"], os.O_RDONLY | os.O_NONBLOCK)] = info
+                fd = os.open(info["path"], os.O_RDONLY | os.O_NONBLOCK)
             except OSError:
-                pass
+                continue
+            self.fds[fd] = info
+            # The idle clock starts now. Without this the FIRST change on a
+            # newly opened node had nothing to compare against and counted
+            # as a press — which is how a pad that reports every 17ms was
+            # claimed on the very launch its chatter was detected.
+            self.last_change[fd] = now
         self.available = bool(self.fds)
         return self.available
 
@@ -774,7 +786,7 @@ class RealWatcher:
     def poll(self, now):
         if now - self.last_refresh >= self.REFRESH_MS:
             self.last_refresh = now
-            self.refresh()
+            self.refresh(now)
         if not self.fds:
             return
         try:
@@ -799,15 +811,25 @@ class RealWatcher:
                 self.last[fd] = data
                 if was is None or data == was:
                     continue
-                since = self.last_change.get(fd)
+                since = self.last_change.get(fd, now)
                 self.last_change[fd] = now
-                if since is None or now - since >= self.HID_IDLE_MS:
+                # Once caught chattering, never claimable again this
+                # session, however long a gap it happens to leave later.
+                if info.get("chatty"):
+                    continue
+                if now - since >= self.HID_IDLE_MS:
+                    info["fast"] = 0
                     self.recent.append((now, info))
-                elif not info.get("chatty"):
-                    # Say it once. After this the device simply stops
+                    continue
+                # A run of them, not one. A press and its release are two
+                # changes about 100ms apart, and branding a healthy pad on
+                # that would bar it from ever identifying itself.
+                info["fast"] = info.get("fast", 0) + 1
+                if info["fast"] >= self.HID_CHATTER_RUN:
+                    info["chatty"] = True
+                    # Said once. After this the device simply stops
                     # appearing, and silence in a log is the hardest thing
                     # to debug — this one cost an evening.
-                    info["chatty"] = True
                     print(f"watch: {info['name']} reports continuously "
                           f"(every {now - since}ms, untouched) — it cannot "
                           f"be identified by hidraw, only by its evdev node",
@@ -4691,7 +4713,7 @@ def main():
     result = None
     cycle = RumbleCycle(sdl)
     reals = RealWatcher()
-    if reals.open():
+    if reals.open(sdl.SDL_GetTicks()):
         for _info in sorted(reals.fds.values(), key=lambda i: i["path"]):
             print(f"watch: {_info['path']} {_info['name']} "
                   f"[{_info['vendor']:04x}:{_info['product']:04x}] "
