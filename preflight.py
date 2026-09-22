@@ -43,7 +43,7 @@ import sys
 import time
 
 import sdlui
-from sdlui import (UI, BTN_A, BTN_B, BTN_X, BTN_Y, BTN_START, BTN_BACK,
+from sdlui import (UI, BTN_A, BTN_B, BTN_X, BTN_Y, BTN_START, BTN_BACK, BTN_GUIDE,
                    BTN_LSHOULDER, BTN_RSHOULDER, BTN_LSTICK, BTN_RSTICK,
                    BTN_DPAD_UP, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT,
                    BUTTON_NAMES, SWITCH_EQUIVALENT, SDLK_ESCAPE)
