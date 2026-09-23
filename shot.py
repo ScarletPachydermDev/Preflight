@@ -62,6 +62,9 @@ class FakePad:
         self.label = f"Example pad {slot}"
         self.held = set()
         self.axes = {}
+        self.raw = set()
+        self.hats = {}
+        self.real = None
         self.swap_faces = swap
         self.instance_id = -slot
         self.index = slot - 1

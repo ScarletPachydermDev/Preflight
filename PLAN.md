@@ -678,8 +678,11 @@ measurement was taken in the wrong one.
   Misc1 (15) is the Capture button there, which is where the hotkey goes.
 - `GOPHER_NATIVE_N64` therefore holds gopher64's numbers and `N64_C_NATIVE`
   (the check screen) holds SDL2's. **They look like typos for each other.
-  They are not.** A map learned on the mapping screen is SDL2-measured, so
-  it is not written into gopher64's config for a native N64 pad.
+  They are not.**
+- The mapping screen (hold L+R) and the N64 A/B swap were troubleshooting
+  aids for this pad and were removed on 2026-09-23 once it worked; the N64
+  bottom bar is start, claim P1 and quit only. `pad-maps.json` is no longer
+  read or written.
 - `native_n64()` must read the pad itself as well as its pairing: with Steam
   Input off the pad IS the device, and reading only `pad.real` missed it.
 - gopher64 numbers `--assign-controller` from **0** (`Controller 0: None`
