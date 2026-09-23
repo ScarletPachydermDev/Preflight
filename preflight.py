@@ -138,6 +138,20 @@ def nintendo_layout(pad):
     return any(h in name.lower() for h in NINTENDO_LAYOUT_HINTS)
 
 
+def positional_swap(pad):
+    """The face mirror for a map whose buttons are POSITIONS — a PlayStation
+    pad's shapes — which is the hardware's layout and nothing else.
+
+    A player's swap preference must not reach it. That preference is about
+    letters, set with the triggers on the Switch or Xbox screen, and it is
+    easy to set by accident: squeezing both triggers while testing them does
+    it. An 8bitdo carried an accidental "no mirror" from the xemu screen into
+    PCSX2 and every shape landed inverted. Cross is the bottom button; which
+    SDL button that is depends on the pad, never on a choice.
+    """
+    return nintendo_layout(pad)
+
+
 def default_swap(pad):
     """The swap setting that makes this pad truthful with nobody touching it.
 
@@ -2266,10 +2280,9 @@ def find_duck_config(exe=None):
 
 def duck_pad_rows(pad, player):
     """One [PadN] section: a DualShock wired to this pad."""
-    # Cross is the bottom button. Which SDL button that IS depends on how
-    # Steam handed this pad over, which preflight cannot read — so the pad's
-    # own swap setting decides, and both triggers change it on the screen.
-    face = DUCK_FACE_MIRROR if pad.swap_faces else DUCK_FACE_IDENTITY
+    # Cross is the bottom button. Which SDL button that IS depends on the
+    # pad's hardware layout, and only on that — see positional_swap.
+    face = DUCK_FACE_MIRROR if positional_swap(pad) else DUCK_FACE_IDENTITY
     buttons = dict(DUCK_BUTTON, **face)
     rows = [("Type", "AnalogController")]
     for role, key in DUCK_KEYS.items():
@@ -2419,7 +2432,7 @@ def pcsx2_sdl3(app_id=None, exe=None):
 
 def pcsx2_pad_rows(pad, player):
     """One [PadN] section: a DualShock 2 wired to this pad."""
-    face = PCSX2_FACE_MIRROR if pad.swap_faces else PCSX2_FACE_IDENTITY
+    face = PCSX2_FACE_MIRROR if positional_swap(pad) else PCSX2_FACE_IDENTITY
     buttons = dict(DUCK_BUTTON, **face)
     rows = [("Type", "DualShock2")]
     for role, key in DUCK_KEYS.items():
@@ -2460,7 +2473,7 @@ def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
             continue
         ours[f"Pad{number}"] = pcsx2_pad_rows(pad, player)
         print(f"pcsx2: P{pad.slot} {pad.label} -> Pad{number} = SDL-{player}"
-              f"{' (faces mirrored)' if pad.swap_faces else ''}", flush=True)
+              f"{' (faces mirrored)' if positional_swap(pad) else ''}", flush=True)
     if problems:
         return problems
     for number in PCSX2_PADS_ALL:
@@ -4901,10 +4914,14 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
                      card_bg,
                      # One setting for every map, so the screen always draws
                      # exactly what gets written.
-                     swap=pad.swap_faces if pad else False,
+                     swap=(positional_swap(pad) if layout == "playstation"
+                           else pad.swap_faces) if pad else False,
                      dim=pad is None,
                      holds=holds.get(pad.key) if pad else None,
-                     wys=pad_wysiwyg(pad) if pad else None,
+                     # Always true on the PlayStation map, which follows
+                     # the hardware and has no preference to disagree with.
+                     wys=(True if layout == "playstation"
+                          else pad_wysiwyg(pad)) if pad else None,
                      layout=layout,
                      # Where this pad's C and Z really are — taught,
                      # known, or assumed, in that order.
