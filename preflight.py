@@ -2433,26 +2433,24 @@ GOPHER_NATIVE_N64 = dict(
     z=_axis(4, 1),
     # Real C buttons, and not a stick.
     #
-    # THESE ARE SDL3's NUMBERS, AND THEY ARE NOT PREFLIGHT'S. gopher64 links
-    # SDL3; preflight runs on SDL2. Both reach this pad through HIDAPI, and
-    # the two libraries decode the Switch wire report differently: SDL3
-    # reports Nintendo face buttons by POSITION, so the bit Nintendo calls Y
-    # arrives as West and the bit it calls X arrives as North. SDL2 reports
-    # them by LABEL, the other way round. C up and C left sit on exactly
-    # those two bits, so the same controller needs one pair of numbers here
-    # and the mirrored pair on the check screen (N64_C_NATIVE). They look
-    # like a typo for each other. They are not.
+    # THESE ARE GOPHER64's NUMBERS, AND THEY ARE NOT PREFLIGHT'S. gopher64
+    # statically links its own SDL3, which translates this pad differently
+    # from preflight's SDL2 AND from the system's SDL3 — a probe on the
+    # system library put C right on button 4, while gopher64 plainly treats
+    # button 4 as C up. Only gopher64's view counts here, so these were
+    # read off an N64 input-test ROM running inside gopher64 itself (the
+    # "n64 input test" shortcut): each C button pressed alone, the lit
+    # direction on screen worked back through the slots written.
     #
-    # Measured at the wire, reading /dev/hidraw3 with no library in the way:
-    #   C up    byte3 bit0  = Switch Y  -> SDL3 West   = button 2
-    #   C left  byte3 bit1  = Switch X  -> SDL3 North  = button 3
-    #   C down  byte3 bit7  = Switch ZR -> right trigger = axis 5
-    #   C right byte4 bit0  = Switch -  -> SDL3 Back   = button 4
-    # gopher64's slot order was confirmed against its own source:
-    # R_CBUTTON 8, L_CBUTTON 9, D_CBUTTON 10, U_CBUTTON 11.
-    c_up=_button(2), c_left=_button(3), c_right=_button(4),
-    c_down=_axis(5, 1),
-    hotkey=_button(15),
+    # C right is the one inferred: nothing lit for it while every other
+    # candidate was bound, and button 15 was bound to the HOTKEY — a press
+    # there fires the hotkey and shows nothing, which is exactly what was
+    # seen. The hotkey moves to Home (Guide, 5), which is what that button
+    # is for. gopher64's slot order is from its source: R_CBUTTON 8,
+    # L_CBUTTON 9, D_CBUTTON 10, U_CBUTTON 11.
+    c_up=_button(4), c_left=_button(3), c_down=_button(2),
+    c_right=_button(15),
+    hotkey=_button(5),
 )
 GOPHER_NATIVE_N64_MIRRORED = dict(GOPHER_NATIVE_N64,
                                   a=_button(0), b=_button(1))
