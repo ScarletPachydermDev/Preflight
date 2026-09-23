@@ -2434,23 +2434,23 @@ GOPHER_NATIVE_N64 = dict(
     # Real C buttons, and not a stick.
     #
     # THESE ARE GOPHER64's NUMBERS, AND THEY ARE NOT PREFLIGHT'S. gopher64
-    # statically links its own SDL3, which translates this pad differently
-    # from preflight's SDL2 AND from the system's SDL3 — a probe on the
-    # system library put C right on button 4, while gopher64 plainly treats
-    # button 4 as C up. Only gopher64's view counts here, so these were
-    # read off an N64 input-test ROM running inside gopher64 itself (the
-    # "n64 input test" shortcut): each C button pressed alone, the lit
-    # direction on screen worked back through the slots written.
-    #
-    # C right is the one inferred: nothing lit for it while every other
-    # candidate was bound, and button 15 was bound to the HOTKEY — a press
-    # there fires the hotkey and shows nothing, which is exactly what was
-    # seen. The hotkey moves to Home (Guide, 5), which is what that button
-    # is for. gopher64's slot order is from its source: R_CBUTTON 8,
-    # L_CBUTTON 9, D_CBUTTON 10, U_CBUTTON 11.
+    # builds SDL 3.4 in statically, and SDL 3.4 carries its own gamepad
+    # mapping for this pad (SDL_gamepad.c, k_eSwitchDeviceInfoControllerType
+    # _N64): "back:b3, y:b2, x:a5, misc2:b4". Preflight's SDL2 and the
+    # system's SDL 3.2 use a different one, so the same press has different
+    # numbers there. Through SDL 3.4:
+    #   C up    -> joystick b3 -> Back  (4)
+    #   C left  -> joystick b2 -> North (3)
+    #   C down  -> joystick a5 -> West  (2)
+    #   C right -> joystick b4 -> Misc2 (21)
+    # The first three were also read off an N64 input-test ROM inside
+    # gopher64 before the source was found, and agree. gopher64's slot
+    # order is from its source: R_CBUTTON 8, L_CBUTTON 9, D_CBUTTON 10,
+    # U_CBUTTON 11.
     c_up=_button(4), c_left=_button(3), c_down=_button(2),
-    c_right=_button(15),
-    hotkey=_button(5),
+    c_right=_button(21),
+    # Misc1 is the Capture button in the same mapping ("misc1:b11").
+    hotkey=_button(15),
 )
 GOPHER_NATIVE_N64_MIRRORED = dict(GOPHER_NATIVE_N64,
                                   a=_button(0), b=_button(1))
