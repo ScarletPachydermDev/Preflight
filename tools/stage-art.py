@@ -97,6 +97,17 @@ PS_PLAIN = {"dpad": "playstation_dpad",
             "stick_r": "playstation_stick_top_r"}
 PS_ARMS = ("dpad_up", "dpad_down", "dpad_left", "dpad_right")
 
+# The Xbox set, for xemu: the same four families as the PlayStation one, from
+# the same pack, so both maps are drawn in one hand.
+XBOX_DIR = os.path.join(SWITCH_DIR, "xbox")
+XBOX_PACK = os.path.join("Xbox Series", "Double")
+XBOX_FACES = {k: "xbox_button_" + k for k in ("a", "b", "x", "y")}
+XBOX_PAIRS = {"lb": "xbox_lb", "rb": "xbox_rb", "lt": "xbox_lt",
+              "rt": "xbox_rt", "view": "xbox_button_view",
+              "menu": "xbox_button_menu"}
+XBOX_PLAIN = {"dpad": "xbox_dpad", "stick_l": "xbox_stick_top_l",
+              "stick_r": "xbox_stick_top_r"}
+
 N64_DIR = os.path.join(SWITCH_DIR, "n64")
 # Drawn by the user to match Kenney's hand, since the pack has no N64 set.
 # Colour is dropped on the way in like everything else — the map tints what
@@ -626,6 +637,38 @@ def ps(pack):
     return count
 
 
+def xbox(pack):
+    """The Xbox set, from the pack — ps() in another family."""
+    os.makedirs(XBOX_DIR, exist_ok=True)
+
+    def load_x(name):
+        return Image.open(os.path.join(pack, XBOX_PACK, name + ".png")).convert("RGBA")
+
+    count = 0
+    for key, src in XBOX_FACES.items():
+        ring, letter = split_letter(white(load_x(src + "_outline")))
+        if letter is None:
+            sys.exit(f"{src}: expected a letter inside the ring")
+        flat = ring.copy()
+        flat.alpha_composite(letter)
+        flat.save(os.path.join(XBOX_DIR, key + ".png"))
+        letter.save(os.path.join(XBOX_DIR, key + "_letter.png"))
+        press_from(white(load_x(src))).save(
+            os.path.join(XBOX_DIR, key + "_press.png"))
+        count += 3
+    for key, src in XBOX_PAIRS.items():
+        white(load_x(src + "_outline")).save(os.path.join(XBOX_DIR, key + ".png"))
+        white(load_x(src)).save(os.path.join(XBOX_DIR, key + "_on.png"))
+        count += 2
+    for key, src in XBOX_PLAIN.items():
+        white(load_x(src)).save(os.path.join(XBOX_DIR, key + ".png"))
+        count += 1
+    for key in PS_ARMS:
+        arm_only(load_x("xbox_" + key)).save(os.path.join(XBOX_DIR, key + ".png"))
+        count += 1
+    return count
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
@@ -633,7 +676,7 @@ def main():
     licence = os.path.join(pack, "License.txt")
     if not os.path.isdir(os.path.join(pack, GC_PACK)):
         sys.exit(f"no {GC_PACK} in {pack}")
-    staged = gamecube(pack) + n64() + ps(pack)
+    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack)
     derived = switch_faces()
     if os.path.isfile(licence):
         shutil.copyfile(licence, os.path.join(SWITCH_DIR, "LICENSE-kenney.txt"))

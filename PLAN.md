@@ -639,6 +639,24 @@ recording:
   Names now include the paired hardware's own, and anything still unmatched
   disables its port instead of stopping the game — unless it is P1's.
 
+**xemu, as of 2026-09-23.** Built from xemu's source (`config_spec.yml`,
+`ui/xemu-input.c`) and an `xemu.toml` it wrote on the machine.
+
+- A port is bound by the pad's **full SDL GUID, name-CRC included**
+  (`[input.bindings] portN = '<guid>'`, `portN_driver = 'usb-xbox-gamepad'`),
+  so Steam's virtual pads are told apart with nothing zeroed. The flatpak
+  links the runtime's SDL 3.2.30; the GUIDs listed from INSIDE its sandbox
+  (`flatpak run --command=python3`) were byte-identical to preflight's, for
+  a virtual pad and for a Bluetooth N64 pad, so ours are written as is.
+- `gamepad_mappings[].controller_mapping` names the SDL gamepad button each
+  Xbox button reads, so the ABXY mirror is `a=1, b=0, x=3, y=2`. Entries for
+  pads we don't write are kept, and for ours only the four faces change.
+- Written by text surgery on two blocks, then validated with `tomllib`
+  before the file is replaced (backup first).
+- Two identical pads share a GUID (Steam Input off) and xemu may swap them.
+- The check screen gets an Xbox map (`art/xbox/`, Kenney's Xbox Series set,
+  staged by `stage-art.py`): A bottom, B right, X left, Y top, lit by name.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No

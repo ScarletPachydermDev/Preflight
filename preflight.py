@@ -1349,6 +1349,7 @@ BACKENDS = {
     "cemu": ("cemu",),
     "gopher64": ("gopher",),
     "duckstation": ("duckstation",),
+    "xemu": ("xemu",),
 }
 
 
@@ -2351,6 +2352,212 @@ def write_duck_config(cfg_path, pads, exe=None):
     stamp = time.strftime("%Y%m%d-%H%M%S")
     shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"settings.{stamp}.ini"))
     write_ini(cfg_path, out)
+    return []
+
+
+# -------------------------------------------------------------------- xemu
+
+# Built from xemu's own source (config_spec.yml, ui/xemu-input.c) and read
+# back against an xemu.toml it wrote on the machine, 2026-09-23:
+#
+#   [input.bindings]  port1_driver = 'usb-xbox-gamepad'
+#                     port1 = '030079f6de280000ff11000001000000'
+#   [input]           gamepad_mappings = [ { gamepad_id = '...',
+#                         controller_mapping = { a = 0, ... } } ]
+#
+# A port is bound by the pad's full SDL GUID, name-CRC included — so, unlike
+# Ryujinx and Eden, Steam's virtual pads are told apart by it with nothing
+# zeroed. xemu's flatpak uses the freedesktop runtime's SDL 3.2.30, and
+# listing the pads from INSIDE its sandbox gave byte-identical GUIDs to ours
+# for both a virtual pad and a Bluetooth N64 pad, so ours are written as is.
+#
+# controller_mapping says which SDL gamepad button each Xbox button reads
+# (xemu_input_update_sdl_controller_state), so the ABXY mirror is just
+# a=1, b=0, x=3, y=2.
+#
+# Limitation: two pads with the SAME GUID — identical controllers with Steam
+# Input off — cannot be told apart. xemu binds such a pad to whichever of
+# their ports is free, so the two players may swap.
+XEMU_APP_ID = "app.xemu.xemu"
+XEMU_FACE_IDENTITY = {"a": 0, "b": 1, "x": 2, "y": 3}
+XEMU_FACE_MIRROR = {"a": 1, "b": 0, "x": 3, "y": 2}
+XEMU_DRIVER = "usb-xbox-gamepad"
+
+
+def find_xemu_config(app_id=None, exe=None):
+    """xemu.toml: the flatpak's data dir, or the native one."""
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        # A portable build keeps its config beside itself.
+        if os.path.isfile(os.path.join(base, "xemu.toml")):
+            return os.path.join(base, "xemu.toml")
+        return os.path.expanduser("~/.local/share/xemu/xemu/xemu.toml")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or XEMU_APP_ID}/data/xemu/xemu/xemu.toml")
+
+
+def _toml_value(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, str):
+        # xemu writes single-quoted literal strings; a GUID never needs
+        # escaping, anything with a quote in it falls back to basic.
+        return f"'{v}'" if "'" not in v and "\n" not in v else json.dumps(v)
+    if isinstance(v, dict):
+        return "{ " + ", ".join(f"{k} = {_toml_value(x)}"
+                                for k, x in v.items()) + " }"
+    if isinstance(v, list):
+        return "[ " + ", ".join(_toml_value(x) for x in v) + " ]"
+    raise ValueError(f"cannot write {type(v).__name__} to TOML")
+
+
+def _toml_header(line):
+    """The table a header line opens, or None. Arrays of tables count too."""
+    t = line.strip()
+    if t.startswith("[[") and t.endswith("]]"):
+        return t[2:-2].strip()
+    if t.startswith("[") and t.endswith("]") and not t.startswith("[["):
+        return t[1:-1].strip()
+    return None
+
+
+def _drop_toml_key(lines, key):
+    """Remove `key = ...` from these lines, following a multi-line array."""
+    out, i = [], 0
+    while i < len(lines):
+        line = lines[i]
+        if line.split("=", 1)[0].strip() == key and "=" in line:
+            depth = line.count("[") - line.count("]") \
+                + line.count("{") - line.count("}")
+            i += 1
+            while depth > 0 and i < len(lines):
+                depth += lines[i].count("[") - lines[i].count("]") \
+                    + lines[i].count("{") - lines[i].count("}")
+                i += 1
+            continue
+        out.append(line)
+        i += 1
+    return out
+
+
+def write_xemu_config(cfg_path, pads):
+    """Bind each assigned pad to its Xbox port, and set its face mapping.
+
+    [input.bindings] is replaced wholesale: a port still holding yesterday's
+    GUID is a second player nobody is holding. gamepad_mappings keeps every
+    entry for a pad we are not writing, and for ours keeps everything except
+    the four face buttons, so a user's own rumble or axis settings survive.
+    """
+    import tomllib
+
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)
+    if not assigned:
+        return ["no controllers assigned"]
+    if len(assigned) > 4:
+        assigned = assigned[:4]
+    if not os.path.isfile(cfg_path):
+        return ["xemu's xemu.toml was not found — run xemu once first."]
+    try:
+        with open(cfg_path, "rb") as fh:
+            data = tomllib.load(fh)
+        with open(cfg_path) as fh:
+            lines = fh.read().splitlines()
+    except (OSError, ValueError) as err:
+        return [f"cannot read xemu.toml: {err}"]
+
+    problems, guids = [], {}
+    for pad in assigned:
+        guid = getattr(pad, "sdl_guid", None)
+        if not guid:
+            problems.append(f"{pad.label}: no SDL GUID to bind")
+            continue
+        guids[pad.slot] = guid
+    if problems:
+        return problems
+    dupes = {g for g in guids.values() if list(guids.values()).count(g) > 1}
+    if dupes:
+        print("xemu: identical controllers share a GUID; xemu may swap "
+              "their ports", flush=True)
+
+    old = (data.get("input") or {}).get("gamepad_mappings") or []
+    ours = set(guids.values())
+    mappings = [dict(m) for m in old if m.get("gamepad_id") not in ours]
+    for pad in assigned:
+        guid = guids[pad.slot]
+        prev = next((m for m in old if m.get("gamepad_id") == guid), {})
+        entry = dict(prev)
+        entry["gamepad_id"] = guid
+        cmap = dict(prev.get("controller_mapping") or {})
+        cmap.update(XEMU_FACE_MIRROR if pad.swap_faces else XEMU_FACE_IDENTITY)
+        entry["controller_mapping"] = cmap
+        mappings.append(entry)
+        print(f"xemu: P{pad.slot} {pad.label} -> port{pad.slot} = {guid}"
+              f"{' (A/B mirrored)' if pad.swap_faces else ''}", flush=True)
+
+    bindings = dict((data.get("input") or {}).get("bindings") or {})
+    for n in range(1, 5):
+        if n in guids:
+            bindings[f"port{n}_driver"] = XEMU_DRIVER
+            bindings[f"port{n}"] = guids[n]
+        else:
+            bindings.pop(f"port{n}", None)
+    order = [k for n in range(1, 5) for k in (f"port{n}_driver", f"port{n}")]
+    bindings_text = [f"{k} = {_toml_value(bindings[k])}"
+                     for k in order if k in bindings]
+    bindings_text += [f"{k} = {_toml_value(v)}" for k, v in bindings.items()
+                      if k not in order]
+    mappings_text = (["gamepad_mappings = ["]
+                     + [f"    {_toml_value(m)}," for m in mappings] + ["    ]"])
+
+    # Split into (header, body) blocks; the first has no header.
+    blocks, cur = [[None, []]], None
+    for line in lines:
+        h = _toml_header(line)
+        if h is not None:
+            blocks.append([line, []])
+        else:
+            blocks[-1][1].append(line)
+
+    out, have_input, have_bindings = [], False, False
+    for header, body in blocks:
+        name = _toml_header(header) if header else None
+        # An array-of-tables spelling of the mappings is dropped whole; the
+        # inline array written under [input] replaces it.
+        if name and name.startswith("input.gamepad_mappings"):
+            continue
+        if name == "input.bindings":
+            have_bindings = True
+            out += [header] + bindings_text + [""]
+            continue
+        if name == "input":
+            have_input = True
+            body = _drop_toml_key(body, "gamepad_mappings")
+            while body and not body[-1].strip():
+                body.pop()
+            out += [header] + body + mappings_text + [""]
+            continue
+        if header:
+            out.append(header)
+        out += body
+    if not have_input:
+        out += ["", "[input]"] + mappings_text
+    if not have_bindings:
+        out += ["", "[input.bindings]"] + bindings_text
+    text = "\n".join(out).rstrip("\n") + "\n"
+    try:
+        tomllib.loads(text)
+    except ValueError as err:
+        return [f"would have written invalid xemu.toml: {err}"]
+
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"xemu.{stamp}.toml"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, cfg_path)
     return []
 
 
@@ -3636,10 +3843,11 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
         dw, dh = bh * aspect, bh
     g = Bay(ui, bx + (bw - dw) / 2, by + (bh - dh) / 2, dw, dh, col, bg, dim,
             art={"gamecube": "gc/", "n64": "n64/",
-                 "playstation": "ps/"}.get(layout, ""))
+                 "playstation": "ps/", "xbox": "xbox/"}.get(layout, ""))
     controls = {"gamecube": _gamecube_controls,
                 "n64": _n64_controls,
-                "playstation": _playstation_controls}.get(
+                "playstation": _playstation_controls,
+                "xbox": _xbox_controls}.get(
                     layout, _switch_controls)
     if controls is _n64_controls:
         controls(g, held, axes, swap, holds or {}, wys, src, raw)
@@ -3824,6 +4032,43 @@ def _playstation_controls(g, held, axes, swap, holds, wys):
 
     live = face_live(held, swap)       # hardware layout, not a choice
     for letter, name, dx, dy in PS_FACES:
+        g.face(name, lay.centres[3] + dx * lay.fspread,
+               lay.row_y + dy * lay.fspread, lay.fside,
+               pressed=letter in live, wys=wys)
+
+    for lane, btn, ax, ay, name in ((1, BTN_LSTICK, 0, 1, "stick_l"),
+                                    (2, BTN_RSTICK, 2, 3, "stick_r")):
+        stick(g, lay.centres[lane], lay.row_y, lay.sside, lay.stravel,
+              axes, ax, ay, name, on(btn))
+
+
+# An Xbox pad, for xemu, in the same skeleton as the DualShock: triggers
+# outermost, bumpers inboard, View and Menu in the middle. The four faces
+# sit where an Xbox puts them — A bottom, B right, X left, Y top — and light
+# by NAME, as on the Switch map: the one setting, swap, is what says which
+# of the pad's letters answers to which.
+XBOX_FACES = (("A", "a", 0, 1), ("B", "b", 1, 0),
+              ("X", "x", -1, 0), ("Y", "y", 0, -1))
+
+
+def _xbox_controls(g, held, axes, swap, holds, wys):
+    S = g.S
+    on = held.__contains__
+    lay = Layout(g)
+
+    draw_top_row(g, lay, (
+        Control(-lay.TRIGGER, "lt", S(0.31), axis=4),
+        Control(-lay.SHOULDER, "lb", S(0.31), (BTN_LSHOULDER,)),
+        Control(lay.SHOULDER, "rb", S(0.31), (BTN_RSHOULDER,)),
+        Control(lay.TRIGGER, "rt", S(0.31), axis=5),
+        Control(-lay.INNER, "view", S(0.21), (BTN_BACK,)),
+        Control(lay.INNER, "menu", S(0.21), (BTN_START,)),
+    ), holds, held, axes)
+
+    dpad_arms(g, lay.centres[0], lay.row_y, lay.dside, held)
+
+    live = face_live(held, swap)
+    for letter, name, dx, dy in XBOX_FACES:
         g.face(name, lay.centres[3] + dx * lay.fspread,
                lay.row_y + dy * lay.fspread, lay.fside,
                pressed=letter in live, wys=wys)
@@ -4291,6 +4536,9 @@ GLYPH_ART = {
     # GameCube's, so they take the same widening.
     "ps:l2": ("ps/l2", 1.15), "ps:r2": ("ps/r2", 1.15),
     "ps:select": ("ps/select", 1.0), "ps:start": ("ps/start", 1.0),
+    # The Xbox set.
+    "xb:lt": ("xbox/lt", 1.0), "xb:rt": ("xbox/rt", 1.0),
+    "xb:view": ("xbox/view", 1.0), "xb:menu": ("xbox/menu", 1.0),
 }
 
 
@@ -4559,6 +4807,13 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
         if layout == "gamecube":
             items.insert(2, (["gc:l", "sep+", "gc:r"], None, anyone,
                              "swap ABXY"))
+    elif layout == "xbox":
+        items = [
+            (["xb:menu"], "P1", p1c, "hold to start"),
+            claim,
+            (["xb:lt", "sep+", "xb:rt"], None, anyone, "swap ABXY"),
+            (["xb:view"], "P1", p1c, "hold to quit"),
+        ]
     elif layout == "playstation":
         # No swap entry: the shapes are positions, and which SDL letter
         # sits on each one is settled by the pad's own vendor id once it
@@ -4603,7 +4858,8 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 # GameCube game gets a GameCube map. Anything not listed gets the Switch one,
 # which is also what an unrecognised target falls back to.
 BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
-                  "gopher64": "n64", "duckstation": "playstation"}
+                  "gopher64": "n64", "duckstation": "playstation",
+                  "xemu": "xbox"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -4758,6 +5014,9 @@ BACKEND_ENV = {
     # An AppImage inherits our environment, but the hint costs nothing and
     # the day it ships as a flatpak this is the line that saves an evening.
     "duckstation": (VIRTUAL_PAD_HINT,),
+    # xemu's flatpak links the runtime's SDL 3.2, which hides Steam's virtual
+    # pads from a sandboxed process like every SDL since 2.32.
+    "xemu": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -4871,6 +5130,8 @@ def main():
         cfg_path = find_gopher_config(app_id, exe)
     elif backend == "duckstation":
         cfg_path = find_duck_config(exe)
+    elif backend == "xemu":
+        cfg_path = find_xemu_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -5219,6 +5480,8 @@ def main():
                 problems = write_gopher_config(cfg_path, pads, app_id, exe)
             elif backend == "duckstation":
                 problems = write_duck_config(cfg_path, pads, exe)
+            elif backend == "xemu":
+                problems = write_xemu_config(cfg_path, pads)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:
