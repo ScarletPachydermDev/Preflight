@@ -648,6 +648,61 @@ being pursued there either — and no hint is shown on the check screen, since
 the map is for testing inputs, not for teaching another program's hotkeys.
 Anyone who wants rumble presses Select+B per player, per session.
 
+**A real N64 controller, resolved 2026-09-23 (0.2.94).** The Nintendo Switch
+Online N64 pad (`057e:2019`) took days, and the cause was never the pad:
+**three copies of SDL number it three different ways**, and every
+measurement was taken in the wrong one.
+
+| | preflight (SDL2) | system SDL 3.2.18 | gopher64 (SDL 3.4, static) |
+|---|---|---|---|
+| C up    | North 3 | North 3 | **Back 4** |
+| C left  | West 2  | West 2  | **North 3** |
+| C down  | right trigger | right trigger | **West 2** |
+| C right | Back 4  | Back 4  | **Misc2 21** |
+
+- The driver layer agrees everywhere. SDL's HIDAPI Switch driver
+  (`SDL_hidapi_switch.c`, `HandleFullControllerState`) reads the wire report
+  the same way in every version: byte3 bit0 → joystick b3, bit1 → b2,
+  bit7 → axis 5, byte4 bit0 → b4. `AlwaysUsesLabels()` is true for the N64,
+  so West/North are swapped by `RemapButton`. Measured on `/dev/hidraw3`
+  directly and it matches.
+- **The mapping layer does not.** SDL 3.4's `SDL_gamepad.c` has its own
+  mapping for `k_eSwitchDeviceInfoControllerType_N64`:
+  `back:b3, y:b2, x:a5, misc2:b4, misc1:b11, righttrigger:b7`. That moves
+  every C button to a new gamepad id, and puts C right on **Misc2 (21)**,
+  which nothing preflight can read will ever report. The older mapping is
+  `back:b4, x:b2, y:b3, righttrigger:a5`.
+- gopher64 writes SDL **gamepad** ids (`ControllerButton { id }`), read
+  through its own statically built SDL — `sdl3-src = "3.4"` in its
+  Cargo.toml. So its numbers come from SDL 3.4's mapping, and nothing else.
+  Misc1 (15) is the Capture button there, which is where the hotkey goes.
+- `GOPHER_NATIVE_N64` therefore holds gopher64's numbers and `N64_C_NATIVE`
+  (the check screen) holds SDL2's. **They look like typos for each other.
+  They are not.** A map learned on the mapping screen is SDL2-measured, so
+  it is not written into gopher64's config for a native N64 pad.
+- `native_n64()` must read the pad itself as well as its pairing: with Steam
+  Input off the pad IS the device, and reading only `pad.real` missed it.
+- gopher64 numbers `--assign-controller` from **0** (`Controller 0: None`
+  first). An `index + 1` there bound every pad to its neighbour.
+
+How it was actually found, for next time:
+
+1. **Never trust a game's behaviour as a readout.** GoldenEye has its own
+   Control Styles; its C buttons strafe and look. An input-test ROM inside
+   the emulator shows the lit button directly — the `n64 input test` Steam
+   shortcut (`mimi-27daaf4.z64`), now preflight-wrapped.
+2. **Measure through the consumer's library, not ours.** A probe on the
+   system SDL3 agreed with preflight and was just as wrong for gopher64.
+3. **Read the consumer's SDL version and that version's mapping source.**
+   One line of `SDL_gamepad.c` answered what a week of pressing did not.
+   Twice the C table was "fixed" by inference from play and both times it
+   was wrong; the measured values were then reverted to, and they were right
+   for SDL2 and wrong for gopher64.
+
+Throwaway tools used, in the machine's /tmp (gone after a reboot): `hidcap.py` (reads a hidraw node and prints changed
+button bits) and `probe4.py` (SDL3 raw + gamepad view).
+Processes started over ssh die when the session closes — hold it open.
+
 Untested so far: the AppImage and portable paths.
 
 Guessing was the old way and it does not survive a second Switch emulator:
@@ -970,9 +1025,45 @@ those games listed afterwards so artwork and the toggle can be changed later.
   portable paths are written and will stay unexercised: SelfSteam offers
   neither as an install type, so there is nothing to test them from.
 - Eden with Steam Input OFF is still unexplained (§6).
+- **Nintendo's Switch 2 GameCube controller (`057e:2073`) is coming.** Expect
+  the N64 problem again, plus one of its own. Found 2026-09-23, before
+  owning one:
+  * **Dolphin is bound through evdev** (`evdev/<n>/<kernel name>`, §7), so
+    it needs a kernel node. hid-nintendo support for Switch 2 controllers is
+    still an unmerged patch series (v13 on linux-input, 2026-08); SteamOS's
+    kernel almost certainly has none. With no node, Dolphin has nothing to
+    bind — the Steam Controller's situation in §6. Switch 2 pads also need
+    an enable handshake before they report anything (userspace:
+    NSW2-controller-enabler over USB, nsogcd / switch2-controllers-linux
+    over Bluetooth).
+  * **Through Steam Input it may just work**, if Steam supports the pad: it
+    then becomes a virtual pad with a kernel node (`Microsoft X-Box 360 pad
+    N`) that the Dolphin backend already binds. Check this first. Steam will
+    then decide the face layout; a GameCube pad has no diamond, so read what
+    arrives, don't assume.
+  * **SDL 3.4 has its own mapping** for it: `a:b1, b:b3, x:b0, y:b2,
+    guide:b4, start:b5, leftshoulder:b6, rightshoulder:b7, lefttrigger:a4,
+    righttrigger:a5, misc1..4:b8..b11` with the
+    `SDL_GAMECONTROLLER_USE_GAMECUBE_LABELS` hint, and `AlwaysUsesLabels()`
+    is true for GameCube pads. Preflight's SDL2 almost certainly has no
+    entry at all. So the check screen and any SDL-based emulator will
+    disagree, as they did for the N64.
+  * Plan: before writing a binding, find out (1) whether a kernel node
+    exists (`/sys/class/input/*/device/name`), (2) whether Steam Input
+    virtualises it, (3) which SDL the target emulator reads it through, and
+    check with a GameCube input-test ROM inside Dolphin, not a game.
 
 ## 10. Gotchas seen more than once
 
+- **Pushing does not deploy.** SelfSteam refreshes preflight only when a
+  preflight-enabled shortcut is created or saved, never at launch. Copy the
+  tree to `~/.local/share/selfsteam/preflight` on the machine
+  (`git archive HEAD | ssh deck@192.168.8.222 "tar -x -C …"`) and confirm the
+  `preflight X.Y.Z` line in launch.log before believing any test. A whole
+  round of N64 testing ran the previous build.
+- **Different SDLs, different numbers.** preflight (SDL2), the system SDL3
+  and an emulator's bundled SDL can each map one pad differently. Get an
+  emulator's ids from the SDL it ships (§7, the N64 controller).
 - **After changing shortcut settings, Steam can believe the app is still
   running** and the Play button silently does nothing. Restart Steam
   (Steam → Power → Restart Steam). `state/launch.log` proves whose fault it is:
