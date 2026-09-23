@@ -2431,16 +2431,26 @@ GOPHER_NATIVE_N64 = dict(
     # the left one free for a Steam Input C-shift, which a pad with real C
     # buttons has no use for.
     z=_axis(4, 1),
-    # Real C buttons, and not a stick. MEASURED: pressing C right alone,
-    # ten times, logged joystick button 4 and gamepad button 4 every time.
-    # This pad's raw and gamepad numbers coincide here, so there is one
-    # scheme, not two.
+    # Real C buttons, and not a stick.
     #
-    # These four were shifted once, on a reading of play that had C left
-    # firing the game's C up and so on. That could not be reconciled with a
-    # direct measurement repeated ten times, and a measurement of one button
-    # pressed alone beats an impression of four pressed in sequence.
-    c_up=_button(3), c_left=_button(2), c_right=_button(4),
+    # THESE ARE SDL3's NUMBERS, AND THEY ARE NOT PREFLIGHT'S. gopher64 links
+    # SDL3; preflight runs on SDL2. Both reach this pad through HIDAPI, and
+    # the two libraries decode the Switch wire report differently: SDL3
+    # reports Nintendo face buttons by POSITION, so the bit Nintendo calls Y
+    # arrives as West and the bit it calls X arrives as North. SDL2 reports
+    # them by LABEL, the other way round. C up and C left sit on exactly
+    # those two bits, so the same controller needs one pair of numbers here
+    # and the mirrored pair on the check screen (N64_C_NATIVE). They look
+    # like a typo for each other. They are not.
+    #
+    # Measured at the wire, reading /dev/hidraw3 with no library in the way:
+    #   C up    byte3 bit0  = Switch Y  -> SDL3 West   = button 2
+    #   C left  byte3 bit1  = Switch X  -> SDL3 North  = button 3
+    #   C down  byte3 bit7  = Switch ZR -> right trigger = axis 5
+    #   C right byte4 bit0  = Switch -  -> SDL3 Back   = button 4
+    # gopher64's slot order was confirmed against its own source:
+    # R_CBUTTON 8, L_CBUTTON 9, D_CBUTTON 10, U_CBUTTON 11.
+    c_up=_button(2), c_left=_button(3), c_right=_button(4),
     c_down=_axis(5, 1),
     hotkey=_button(15),
 )
@@ -2611,11 +2621,14 @@ def gopher_entry(pad, template):
     else:
         table = GOPHER_MIRRORED if pad.swap_faces else GOPHER_IDENTITY
     # Anything the player taught preflight on the mapping screen overrides
-    # the table, here as on the check screen. This was disabled for a while
-    # on the belief that gopher64 numbered these pads differently; it does
-    # not, and the mapping screen's answers match what pressing the buttons
-    # one at a time reports.
+    # the table — except on a native N64 pad, where it must not. That screen
+    # measures through preflight's SDL2, and gopher64 reads the same pad
+    # through SDL3, which numbers two of its C buttons the other way round
+    # (see GOPHER_NATIVE_N64). A learned map is right for the check screen
+    # and wrong here, and writing it back put the swap straight back in.
     table = dict(table)
+    if native_n64(pad):
+        learned = {}
     for role, got in learned.items():
         if role not in table or not got:
             continue
