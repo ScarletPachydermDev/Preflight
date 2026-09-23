@@ -657,6 +657,19 @@ recording:
 - The check screen gets an Xbox map (`art/xbox/`, Kenney's Xbox Series set,
   staged by `stage-art.py`): A bottom, B right, X left, Y top, lit by name.
 
+**PCSX2, as of 2026-09-23.** Its input code is DuckStation's (both
+stenzek's), read out of v2.8.2's source (`Input/SDLInputSource.cpp`,
+`SIO/Pad/PadDualshock2.cpp`, `SIO/Pad/Pad.cpp`, `SIO/Sio.h`), so the backend
+reuses DuckStation's tables. Differences: buttons are written with SDL3's
+position names (`FaceSouth`/`FaceEast`/`FaceWest`/`FaceNorth`), and the
+multitap is `[Pad] MultitapPort1`. Pads are `SDL-<player index>`, read
+through PCSX2's OWN SDL — the flatpak bundles SDL **3.4.12** in
+`files/lib`, found by `pcsx2_sdl3()` — and four players land in Pad1, Pad3,
+Pad4, Pad5. Seen in the dry run: outside a game, SDL 3.4 opens the 2026
+Steam Controller as real hardware (`03002854de28…0513…`) as well as Steam's
+virtual pad; pads are matched by exact GUID, so it should not matter, but it
+is the first thing to check if a player lands on the wrong pad.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No

@@ -34,6 +34,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | **gopher64** | flatpak | all four players' bindings, as N64 pads — and enables ports 2-4, which gopher64 ships disabled |
 | **DuckStation** | AppImage | all four players' bindings, as DualShocks with rumble — and turns the multitap on for three or more — needs Steam Input **on** |
 | **xemu** | flatpak | all four players' bindings, as Xbox controllers, by each pad's own id |
+| **PCSX2** | flatpak | all four players' bindings, as DualShock 2s with rumble — and turns the multitap on for three or more |
 
 ## Requirements
 

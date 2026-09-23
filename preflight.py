@@ -1350,6 +1350,7 @@ BACKENDS = {
     "gopher64": ("gopher",),
     "duckstation": ("duckstation",),
     "xemu": ("xemu",),
+    "pcsx2": ("pcsx2",),
 }
 
 
@@ -2196,7 +2197,11 @@ sdl.SDL_Quit()
 
 def duck_players(exe=None):
     """[(player index, guid, name)] as DuckStation's own SDL3 sees them."""
-    lib = find_emulator_sdl3(exe)
+    return sdl3_players(find_emulator_sdl3(exe))
+
+
+def sdl3_players(lib):
+    """[(player index, guid, name)] as this SDL3 library sees them."""
     if not lib:
         return None
     env = dict(os.environ,
@@ -2351,6 +2356,140 @@ def write_duck_config(cfg_path, pads, exe=None):
     os.makedirs(BACKUP_DIR, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"settings.{stamp}.ini"))
+    write_ini(cfg_path, out)
+    return []
+
+
+# ------------------------------------------------------------------- pcsx2
+
+# PCSX2's input code is DuckStation's (both are stenzek's), and it shows:
+# read out of PCSX2 v2.8.2's own source (Input/SDLInputSource.cpp,
+# SIO/Pad/PadDualshock2.cpp, SIO/Pad/Pad.cpp, SIO/Sio.h), everything lines
+# up with the DuckStation backend except two things.
+#
+# * Button names are SDL3's position names — FaceSouth, FaceEast, FaceWest,
+#   FaceNorth — where DuckStation writes A/B/X/Y. (The letters still load,
+#   through a migration table, but the file is written the way PCSX2 writes
+#   it.) Everything else, "+LeftTrigger", "-LeftY", "DPadUp", is the same.
+# * The multitap switch is [Pad] MultitapPort1 = true|false.
+#
+# Shared with DuckStation: a pad is "SDL-<player index>", the index being
+# SDL's own player index for the pad (SDLInputSource::OpenDevice), so it is
+# read through PCSX2's OWN SDL — the flatpak bundles SDL 3.4.12, a
+# different library from ours — and the four players of a multitap on port 1
+# land in Pad1, Pad3, Pad4, Pad5 (sioConvertPortAndSlotToPad), exactly as
+# DuckStation numbers them.
+PCSX2_APP_ID = "net.pcsx2.PCSX2"
+PCSX2_FACE_IDENTITY = {"cross": "FaceSouth", "circle": "FaceEast",
+                       "square": "FaceWest", "triangle": "FaceNorth"}
+PCSX2_FACE_MIRROR = {"cross": "FaceEast", "circle": "FaceSouth",
+                     "square": "FaceNorth", "triangle": "FaceWest"}
+PCSX2_PADS_PLAIN = (1, 2)
+PCSX2_PADS_MULTITAP = (1, 3, 4, 5)
+PCSX2_PADS_ALL = tuple(range(1, 9))
+
+
+def find_pcsx2_config(app_id=None, exe=None):
+    """PCSX2.ini: portable beside the binary, the native config dir, or the
+    flatpak's."""
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        if os.path.isfile(os.path.join(base, "portable.ini")) or \
+                os.path.isfile(os.path.join(base, "portable.txt")):
+            return os.path.join(base, "inis", "PCSX2.ini")
+        return os.path.expanduser("~/.config/PCSX2/inis/PCSX2.ini")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or PCSX2_APP_ID}/config/PCSX2/inis/PCSX2.ini")
+
+
+def pcsx2_sdl3(app_id=None, exe=None):
+    """The SDL3 this PCSX2 will load: bundled in the flatpak's /app/lib, or
+    inside the AppImage."""
+    import glob
+    if exe:
+        return find_emulator_sdl3(exe)
+    for root in ("/var/lib/flatpak/app",
+                 os.path.expanduser("~/.local/share/flatpak/app")):
+        hits = sorted(glob.glob(
+            f"{root}/{app_id or PCSX2_APP_ID}/*/*/*/files/lib/libSDL3.so.0"))
+        if hits:
+            return hits[-1]
+    return None
+
+
+def pcsx2_pad_rows(pad, player):
+    """One [PadN] section: a DualShock 2 wired to this pad."""
+    face = PCSX2_FACE_MIRROR if pad.swap_faces else PCSX2_FACE_IDENTITY
+    buttons = dict(DUCK_BUTTON, **face)
+    rows = [("Type", "DualShock2")]
+    for role, key in DUCK_KEYS.items():
+        if role in buttons:
+            rows.append((key, f"SDL-{player}/{buttons[role]}"))
+        elif role in DUCK_AXIS:
+            rows.append((key, f"SDL-{player}/{DUCK_AXIS[role]}"))
+        elif role in DUCK_MOTOR:
+            rows.append((key, f"SDL-{player}/{DUCK_MOTOR[role]}"))
+    return rows
+
+
+def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
+    """A DualShock 2 per assigned pad, and the multitap on port 1 for three
+    or more. Every [PadN] section is replaced; ones we do not fill are
+    emptied to Type = None, since a port still bound to yesterday's pad is a
+    player nobody is holding."""
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)[:4]
+    if not assigned:
+        return ["no controllers assigned"]
+    if not os.path.isfile(cfg_path):
+        return ["PCSX2.ini was not found — run PCSX2 once first."]
+    sections = read_ini(cfg_path)
+    if sections is None:
+        return ["cannot read PCSX2.ini"]
+
+    rows = sdl3_players(pcsx2_sdl3(app_id, exe))
+    if rows is None:
+        print("pcsx2: could not read its own SDL; using ours", flush=True)
+    multitap = len(assigned) > 2
+    numbers = (PCSX2_PADS_MULTITAP if multitap else PCSX2_PADS_PLAIN)
+
+    used, ours, problems = set(), {}, []
+    for pad, number in zip(assigned, numbers):
+        player = duck_player_for(pad, rows, used)
+        if player is None:
+            problems.append(f"{pad.label}: no SDL player index for this pad")
+            continue
+        ours[f"Pad{number}"] = pcsx2_pad_rows(pad, player)
+        print(f"pcsx2: P{pad.slot} {pad.label} -> Pad{number} = SDL-{player}"
+              f"{' (faces mirrored)' if pad.swap_faces else ''}", flush=True)
+    if problems:
+        return problems
+    for number in PCSX2_PADS_ALL:
+        ours.setdefault(f"Pad{number}", [("Type", "None")])
+
+    wanted = {"InputSources": {"SDL": "true"},
+              "Pad": {"MultitapPort1": "true" if multitap else "false"}}
+    out, seen = [], set()
+    for name, existing in sections:
+        if name in ours:
+            out.append((name, ours[name]))
+        elif name in wanted:
+            rows_out = [(k, v) for k, v in existing if k not in wanted[name]]
+            rows_out += list(wanted[name].items())
+            out.append((name, rows_out))
+        else:
+            out.append((name, existing))
+        seen.add(name)
+    for name, values in wanted.items():
+        if name not in seen:
+            out.append((name, list(values.items())))
+    for number in PCSX2_PADS_ALL:
+        name = f"Pad{number}"
+        if name not in seen:
+            out.append((name, ours[name]))
+
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"PCSX2.{stamp}.ini"))
     write_ini(cfg_path, out)
     return []
 
@@ -4859,7 +4998,7 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 # which is also what an unrecognised target falls back to.
 BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "gopher64": "n64", "duckstation": "playstation",
-                  "xemu": "xbox"}
+                  "xemu": "xbox", "pcsx2": "playstation"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -5017,6 +5156,8 @@ BACKEND_ENV = {
     # xemu's flatpak links the runtime's SDL 3.2, which hides Steam's virtual
     # pads from a sandboxed process like every SDL since 2.32.
     "xemu": (VIRTUAL_PAD_HINT,),
+    # PCSX2 bundles SDL 3.4 in its flatpak: the same hiding, the same cure.
+    "pcsx2": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -5132,6 +5273,8 @@ def main():
         cfg_path = find_duck_config(exe)
     elif backend == "xemu":
         cfg_path = find_xemu_config(app_id, exe)
+    elif backend == "pcsx2":
+        cfg_path = find_pcsx2_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -5482,6 +5625,8 @@ def main():
                 problems = write_duck_config(cfg_path, pads, exe)
             elif backend == "xemu":
                 problems = write_xemu_config(cfg_path, pads)
+            elif backend == "pcsx2":
+                problems = write_pcsx2_config(cfg_path, pads, app_id, exe)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:
