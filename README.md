@@ -38,6 +38,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | **Xenia Canary** | AppImage | no player settings exist in Xenia, so the check screen shows the seating Xenia itself will use (Steam's controller order); writes a mirrored button mapping for pads that need one |
 | **Flycast** | flatpak | all four players' Dreamcast ports — and plugs a controller into each one used, since Flycast ships with only port A |
 | **shadPS4** | flatpak | face buttons per seat, by position; shadPS4 seats pads in the order SDL lists them, so the check screen shows that order |
+| **BigPEmu** | flatpak | both Jaguar ports (four with a Team Tap), by each pad's own id — A, B, C on the pad's A, B, X; Pause on Start, Option on Back |
 
 ## Requirements
 

@@ -1415,6 +1415,7 @@ BACKENDS = {
     "xenia": ("xenia",),
     "flycast": ("flycast",),
     "shadps4": ("shadps4",),
+    "bigpemu": ("bigpemu",),
 }
 
 
@@ -2554,6 +2555,178 @@ def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
     stamp = time.strftime("%Y%m%d-%H%M%S")
     shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"PCSX2.{stamp}.ini"))
     write_ini(cfg_path, out)
+    return []
+
+
+# ---------------------------------------------------------------- bigpemu
+
+# BigPEmu is closed source; everything here was read off the machine,
+# 2026-10-01. Config is JSON at ~/.bigpemu_userdata/BigPEmuConfig.bigpcfg
+# (the flatpak has home access and writes to the REAL home). Under
+# BigPEmuConfig/Input, DeviceN is Jaguar port N+1 and holds 51 Bindings in
+# the order of Strings/strings_en.txt's STR_EMUBUTTON0-50: C, B, A, Pause,
+# Option, the d-pad, Numpad-0..9, *, #, two analog sticks, extras, then
+# emulator controls (Menu 37, Fast Forward 38, Overlay 43 ...). Each binding
+# is a list of triggers; a pad trigger names its device by FULL SDL GUID
+# (B_DevID, upper case, name-CRC included) and a raw SDL JOYSTICK number:
+# B_ID < 128 a button, 128+n axis n (B_AH the direction), 134 the hat
+# (B_AH its bitmask). M_* is a held modifier — 130 the left trigger, which
+# with a face button types the keypad; 133 the right, for emulator controls.
+#
+# The template below is BigPEmu's own pad layout as saved for a Steam
+# virtual pad, with the user's choices on top (2026-10-01): A, B, C on the
+# pad's A, B, X — by letter — and Pause on Start, Option on Back.
+# Raw numbers are a Steam virtual pad's (xinput: a b0, b b1, x b2, y b3,
+# lb b4, rb b5, back b6, start b7, ls b9, rs b10); for anything else the
+# face/system buttons are translated through the pad's own SDL mapping.
+BIGPEMU_CONFIG = "~/.bigpemu_userdata/BigPEmuConfig.bigpcfg"
+BIGPEMU_RAW = {"a": 0, "b": 1, "x": 2, "y": 3, "leftshoulder": 4,
+               "rightshoulder": 5, "back": 6, "start": 7, "leftstick": 9,
+               "rightstick": 10}
+# Binding slot -> the SDL button it is pressed with, where we choose it.
+BIGPEMU_CHOSEN = {2: "a", 1: "b", 0: "x", 3: "start", 4: "back"}
+BIGPEMU_PAD_TEMPLATE = [
+    [(2, 0.0)],  # 0
+    [(0, 0.0)],  # 1
+    [(1, 0.0)],  # 2
+    [(6, 0.0)],  # 3
+    [(7, 0.0)],  # 4
+    [(134, 1.0)],  # 5
+    [(134, 4.0)],  # 6
+    [(134, 8.0)],  # 7
+    [(134, 2.0)],  # 8
+    [(10, 0.0, 130, 1.0)],  # 9
+    [(2, 0.0, 130, 1.0)],  # 10
+    [(3, 0.0, 130, 1.0)],  # 11
+    [(1, 0.0, 130, 1.0)],  # 12
+    [(4, 0.0)],  # 13
+    [(3, 0.0)],  # 14
+    [(5, 0.0)],  # 15
+    [(4, 0.0, 130, 1.0)],  # 16
+    [(0, 0.0, 130, 1.0)],  # 17
+    [(5, 0.0, 130, 1.0)],  # 18
+    [(9, 0.0)],  # 19
+    [(10, 0.0)],  # 20
+    [(128, -1.0)],  # 21
+    [(128, 1.0)],  # 22
+    [(129, -1.0)],  # 23
+    [(129, 1.0)],  # 24
+    [(131, -1.0)],  # 25
+    [(131, 1.0)],  # 26
+    [(132, -1.0)],  # 27
+    [(132, 1.0)],  # 28
+    [],  # 29
+    [],  # 30
+    [],  # 31
+    [],  # 32
+    [],  # 33
+    [],  # 34
+    [],  # 35
+    [],  # 36
+    [(7, 0.0, 133, 1.0)],  # 37
+    [(3, 0.0, 133, 1.0)],  # 38
+    [],  # 39
+    [],  # 40
+    [],  # 41
+    [],  # 42
+    [(9, 0.0, 133, 1.0)],  # 43
+    [],  # 44
+    [],  # 45
+    [],  # 46
+    [],  # 47
+    [],  # 48
+    [],  # 49
+    [],  # 50
+]
+
+
+def find_bigpemu_config(app_id=None, exe=None):
+    return os.path.expanduser(BIGPEMU_CONFIG)
+
+
+def _bigpemu_raw(sdl, pad):
+    """SDL gamepad name -> this pad's raw joystick button."""
+    raw = dict(BIGPEMU_RAW)
+    mapping = _pad_mapping(sdl, pad) if sdl else None
+    if mapping and (pad.vendor, pad.product) != STEAM_VIRTUAL:
+        for field in mapping.split(","):
+            key, _, val = field.partition(":")
+            if key in raw and val.startswith("b") and val[1:].isdigit():
+                raw[key] = int(val[1:])
+    if pad.swap_faces:
+        raw["a"], raw["b"] = raw["b"], raw["a"]
+        raw["x"], raw["y"] = raw["y"], raw["x"]
+    return raw
+
+
+def _bigpemu_bindings(pad, raw, keyboard=None):
+    guid = pad.sdl_guid.upper()
+    out = []
+    for slot, triggers in enumerate(BIGPEMU_PAD_TEMPLATE):
+        trig = [dict(t) for t in (keyboard[slot] if keyboard else [])]
+        for t in triggers:
+            entry = {"B_KB": False, "B_ID": t[0], "B_AH": t[1],
+                     "B_DevID": guid}
+            if slot in BIGPEMU_CHOSEN:
+                entry["B_ID"] = raw[BIGPEMU_CHOSEN[slot]]
+            elif t[0] < 128:
+                # Same physical button, renumbered for this pad.
+                name = next((k for k, v in BIGPEMU_RAW.items() if v == t[0]),
+                            None)
+                if name:
+                    entry["B_ID"] = raw[name]
+            if len(t) == 4:
+                entry.update({"M_KB": False, "M_ID": t[2], "M_AH": t[3],
+                              "M_DevID": guid})
+            trig.append(entry)
+        out.append({"Triggers": trig})
+    return out
+
+
+def write_bigpemu_config(cfg_path, pads, sdl):
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)[:4]
+    if not assigned:
+        return ["no controllers assigned"]
+    if not os.path.isfile(cfg_path):
+        return ["BigPEmu's config was not found — run BigPEmu once first."]
+    try:
+        with open(cfg_path) as fh:
+            data = json.load(fh)
+        inp = data["BigPEmuConfig"]["Input"]
+    except (OSError, ValueError, KeyError) as err:
+        return [f"cannot read BigPEmu's config: {err}"]
+
+    # Keyboard triggers live on port 1 and stay there.
+    old0 = (inp.get("Device0") or {}).get("Bindings") or []
+    keyboard = [[t for t in (b.get("Triggers") or []) if t.get("B_KB")]
+                for b in old0] if len(old0) == len(BIGPEMU_PAD_TEMPLATE) else None
+    count = max(2, len(assigned))
+    for n in range(max(count, 4)):
+        dev = dict(inp.get(f"Device{n}") or {"DeviceType": 0})
+        pad = next((p for p in assigned if p.slot == n + 1), None)
+        if pad is not None:
+            dev["Bindings"] = _bigpemu_bindings(
+                pad, _bigpemu_raw(sdl, pad), keyboard if n == 0 else None)
+            print(f"bigpemu: P{pad.slot} {pad.label} -> port {n + 1} = "
+                  f"{pad.sdl_guid}", flush=True)
+        else:
+            dev["Bindings"] = [{"Triggers": list(keyboard[i]) if keyboard
+                                and n == 0 else []}
+                               for i in range(len(BIGPEMU_PAD_TEMPLATE))]
+        if n < count:
+            inp[f"Device{n}"] = dev
+        else:
+            inp.pop(f"Device{n}", None)
+    inp["DeviceCount"] = count
+    inp["AutoAssign"] = 0
+
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"BigPEmuConfig.{stamp}.bigpcfg"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(data, fh, indent=4)
+    os.replace(tmp, cfg_path)
     return []
 
 
@@ -5474,7 +5647,8 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "gopher64": "n64", "duckstation": "playstation",
                   "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox",
-                  "flycast": "dreamcast", "shadps4": "playstation"}
+                  "flycast": "dreamcast", "shadps4": "playstation",
+                  "bigpemu": "xbox"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -5640,6 +5814,8 @@ BACKEND_ENV = {
     "flycast": (VIRTUAL_PAD_HINT,),
     # shadPS4 builds SDL3 in statically: the same hiding.
     "shadps4": (VIRTUAL_PAD_HINT,),
+    # BigPEmu's flatpak runs the runtime's sdl2-compat: the same hiding.
+    "bigpemu": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -5763,6 +5939,8 @@ def main():
         cfg_path = find_flycast_config(app_id, exe)
     elif backend == "shadps4":
         cfg_path = find_shadps4_config(app_id, exe)
+    elif backend == "bigpemu":
+        cfg_path = find_bigpemu_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -6130,6 +6308,8 @@ def main():
                 problems = write_flycast_config(cfg_path, pads)
             elif backend == "shadps4":
                 problems = write_shadps4_config(cfg_path, pads)
+            elif backend == "bigpemu":
+                problems = write_bigpemu_config(cfg_path, pads, sdl)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:

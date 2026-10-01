@@ -704,6 +704,17 @@ without `:N` applies to every seat. preflight drops the shipped controller
 face lines and writes a marked block of per-seat lines (`cross:2 =
 circle:2`), each seat decided by `positional_swap`.
 
+**BigPEmu, as of 2026-10-01.** Closed source; read off the machine. JSON at
+`~/.bigpemu_userdata/BigPEmuConfig.bigpcfg` (real home, not the flatpak's).
+`Input/DeviceN` is port N+1 with 51 `Bindings` in `STR_EMUBUTTON0-50` order
+from `Strings/strings_en.txt` — note slot 0 is **C**, 2 is **A**. Pad
+triggers carry the full SDL GUID (upper case) and RAW joystick numbers
+(128+n axes, 134 the hat with a bitmask), `M_*` a held modifier (130 left
+trigger: keypad; 133 right trigger: emulator menu). Before preflight only
+port 1 was bound, to one Steam slot. User's choices: A/B/C on the pad's
+A/B/X by letter, Pause on Start, Option on Back; the rest of BigPEmu's own
+layout kept as `BIGPEMU_PAD_TEMPLATE`.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No
