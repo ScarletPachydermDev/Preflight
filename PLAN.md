@@ -670,6 +670,18 @@ Steam Controller as real hardware (`03002854de28…0513…`) as well as Steam's
 virtual pad; pads are matched by exact GUID, so it should not matter, but it
 is the first thing to check if a player lands on the wrong pad.
 
+**Xenia Canary, as of 2026-10-01.** From `src/xenia/hid/sdl/sdl_input_driver.cc`.
+Xenia has no per-player controller settings: `OnControllerDeviceAdded`
+seats a pad at SDL's player index (Steam's slot, for a virtual pad) or the
+first free seat. So for this backend the bays follow that rule
+(`_slots_by_player_index`, gaps kept) and claiming P1 is off. Faces: Xenia
+loads `[SDL] mappings_file`, a path RELATIVE to wherever it starts, so
+preflight writes an absolute one and fills a marked block in
+`gamecontrollerdb.txt` with SDL's own mapping for each pad that needs
+mirroring, a/b and x/y exchanged. The AppImage (DwarFS) carries sdl2-compat
+2.32.70 on SDL 3.4.14 built against a newer glibc than SteamOS, so it cannot
+be loaded from outside; Xenia's own log is the check.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No

@@ -1122,11 +1122,39 @@ def resolve_slots(pads, st, claimed_p1=None):
             st["order"][p.key] = st["seq"]
     st["present"] = {p.key for p in pads}
 
+    if st.get("by_player_index"):
+        return _slots_by_player_index(pads, st)
     order = sorted(pads, key=lambda q: (0 if q.key == claimed_p1 else 1,
                                         st["order"][q.key]))
     for i, p in enumerate(order):
         p.slot = i + 1 if i < MAX_PLAYERS else None
     return order
+
+
+def _slots_by_player_index(pads, st):
+    """Slots as an emulator that seats pads by SDL's PLAYER INDEX will.
+
+    Xenia has no setting for which pad is which player: it takes SDL's
+    player index — for a Steam virtual pad that is Steam's own slot — and
+    a pad without one gets the first free seat. preflight cannot change
+    that, so it shows it: the bay is the seat the game will give the pad.
+    Gaps are kept, because the emulator keeps them too.
+    """
+    by_wake = sorted(pads, key=lambda q: st["order"][q.key])
+    taken = {}
+    for p in sorted(by_wake, key=lambda q: getattr(q, "player_index", -1)):
+        idx = getattr(p, "player_index", -1)
+        if 0 <= idx < MAX_PLAYERS and idx not in taken:
+            taken[idx] = p
+    rest = [p for p in by_wake if p not in taken.values()]
+    for p in pads:
+        p.slot = None
+    for idx, p in taken.items():
+        p.slot = idx + 1
+    free = [i for i in range(MAX_PLAYERS) if i not in taken]
+    for p, idx in zip(rest, free):
+        p.slot = idx + 1
+    return sorted(pads, key=lambda q: (q.slot is None, q.slot or 0))
 
 
 # ------------------------------------------------------------ ryujinx config
@@ -1365,6 +1393,7 @@ BACKENDS = {
     "duckstation": ("duckstation",),
     "xemu": ("xemu",),
     "pcsx2": ("pcsx2",),
+    "xenia": ("xenia",),
 }
 
 
@@ -2504,6 +2533,140 @@ def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
     stamp = time.strftime("%Y%m%d-%H%M%S")
     shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"PCSX2.{stamp}.ini"))
     write_ini(cfg_path, out)
+    return []
+
+
+# ----------------------------------------------------------- xenia canary
+
+# Read out of Xenia Canary's source (src/xenia/hid/sdl/sdl_input_driver.cc)
+# and its config on the machine, 2026-10-01. Xenia keeps NO per-player
+# controller settings at all:
+#
+# * Seating is SDL's player index (OnControllerDeviceAdded): for a Steam
+#   virtual pad that is Steam's slot, otherwise the first free seat. Nothing
+#   to write, so preflight seats the bays the same way and offers no P1
+#   claim (_slots_by_player_index).
+# * Button layout comes from SDL's mapping for the pad's GUID, and Xenia
+#   loads extra mappings from [SDL] mappings_file — "gamecontrollerdb.txt",
+#   relative to wherever it was started, so preflight writes an absolute
+#   path there. A pad that needs its faces mirrored gets a line of its own
+#   in that file: SDL's own mapping for it with a/b and x/y exchanged.
+#   Under Steam Input every slot has its own GUID (the name-CRC differs), so
+#   one line touches exactly one pad.
+#
+# The AppImage carries sdl2-compat 2.32.70 on SDL 3.4.14, built against a
+# newer glibc than SteamOS has, so it cannot be loaded from here to ask it
+# anything. What it decides is read back from Xenia's own log instead.
+XENIA_DB_BEGIN = "# --- preflight begin: written every launch, edits here are lost ---"
+XENIA_DB_END = "# --- preflight end ---"
+
+
+def find_xenia_config(exe=None):
+    """xenia-canary.config.toml: portable beside the binary, or Xenia's
+    storage root under the user's data dir."""
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        if os.path.isfile(os.path.join(base, "portable.txt")):
+            return os.path.join(base, "xenia-canary.config.toml")
+    return os.path.expanduser("~/.local/share/Xenia/xenia-canary.config.toml")
+
+
+def _swap_faces_in_mapping(mapping):
+    """An SDL mapping string with A<->B and X<->Y exchanged."""
+    pairs = {"a": "b", "b": "a", "x": "y", "y": "x"}
+    out = []
+    for field in mapping.split(","):
+        key, sep, val = field.partition(":")
+        out.append(f"{pairs[key]}{sep}{val}" if sep and key in pairs else field)
+    return ",".join(out)
+
+
+def _pad_mapping(sdl, pad):
+    """SDL's mapping string for this open pad, or None."""
+    if not getattr(pad, "handle", None):
+        return None
+    sdl.SDL_GameControllerMapping.restype = ctypes.c_void_p
+    sdl.SDL_GameControllerMapping.argtypes = [ctypes.c_void_p]
+    sdl.SDL_free.argtypes = [ctypes.c_void_p]
+    ptr = sdl.SDL_GameControllerMapping(pad.handle)
+    if not ptr:
+        return None
+    try:
+        return ctypes.string_at(ptr).decode(errors="replace")
+    finally:
+        sdl.SDL_free(ptr)
+
+
+def write_xenia_config(cfg_path, pads, sdl):
+    """Point Xenia at our mappings file and fill it for the pads that need
+    their faces mirrored. Seating needs no writing (see above)."""
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)
+    if not assigned:
+        return ["no controllers assigned"]
+    if not os.path.isfile(cfg_path):
+        return ["Xenia's config was not found — run Xenia once first."]
+    db_path = os.path.join(os.path.dirname(cfg_path), "gamecontrollerdb.txt")
+
+    lines, problems = [], []
+    for pad in assigned:
+        print(f"xenia: P{pad.slot} {pad.label} = SDL player "
+              f"{getattr(pad, 'player_index', -1)}, {pad.sdl_guid}"
+              f"{' (A/B mirrored)' if pad.swap_faces else ''}", flush=True)
+        if not pad.swap_faces:
+            continue
+        mapping = _pad_mapping(sdl, pad)
+        if not mapping:
+            problems.append(f"{pad.label}: SDL has no mapping to mirror")
+            continue
+        guid, _, rest = mapping.partition(",")
+        lines.append(_swap_faces_in_mapping(f"{pad.sdl_guid},{rest}"))
+    if problems:
+        return problems
+
+    # Keep anything outside our block: the file is the user's too.
+    keep = []
+    if os.path.isfile(db_path):
+        with open(db_path) as fh:
+            inside = False
+            for line in fh.read().splitlines():
+                if line == XENIA_DB_BEGIN:
+                    inside = True
+                elif line == XENIA_DB_END:
+                    inside = False
+                elif not inside:
+                    keep.append(line)
+    while keep and not keep[-1].strip():
+        keep.pop()
+    text = "\n".join(keep + ([""] if keep else [])
+                     + [XENIA_DB_BEGIN] + lines + [XENIA_DB_END]) + "\n"
+    tmp = db_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, db_path)
+
+    with open(cfg_path) as fh:
+        cfg = fh.read().splitlines()
+    want = f'mappings_file = "{db_path}"'
+    section, done = None, False
+    for i, line in enumerate(cfg):
+        h = _toml_header(line)
+        if h is not None:
+            section = h
+            continue
+        if section == "SDL" and line.split("=", 1)[0].strip() == "mappings_file":
+            comment = line.partition("#")[2]
+            cfg[i] = want + (f"\t# {comment.strip()}" if comment else "")
+            done = True
+    if not done:
+        cfg += ["", "[SDL]", want]
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg_path, os.path.join(BACKUP_DIR,
+                                        f"xenia-canary.{stamp}.config.toml"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(cfg) + "\n")
+    os.replace(tmp, cfg_path)
     return []
 
 
@@ -5015,7 +5178,7 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 # which is also what an unrecognised target falls back to.
 BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "gopher64": "n64", "duckstation": "playstation",
-                  "xemu": "xbox", "pcsx2": "playstation"}
+                  "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -5175,6 +5338,8 @@ BACKEND_ENV = {
     "xemu": (VIRTUAL_PAD_HINT,),
     # PCSX2 bundles SDL 3.4 in its flatpak: the same hiding, the same cure.
     "pcsx2": (VIRTUAL_PAD_HINT,),
+    # Xenia's AppImage runs sdl2-compat on SDL 3.4: the same hiding.
+    "xenia": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -5292,6 +5457,8 @@ def main():
         cfg_path = find_xemu_config(app_id, exe)
     elif backend == "pcsx2":
         cfg_path = find_pcsx2_config(app_id, exe)
+    elif backend == "xenia":
+        cfg_path = find_xenia_config(exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -5300,6 +5467,8 @@ def main():
     p1_pro = backend == "cemu" and cemu_p1_pro(rom)
 
     slots = new_slot_state()
+    # Xenia seats pads itself, by SDL player index; show its seating.
+    slots["by_player_index"] = backend == "xenia"
     pads, unmapped = scan_pads(sdl)
     apply_known(pads, known)
     pads = resolve_slots(pads, slots)
@@ -5464,7 +5633,8 @@ def main():
             if sig != last_sig:
                 last_sig = sig
                 draw_pad_grid(ui, pads, cycle, warnings, needed, holds,
-                              claimed_p1 is not None, alert,
+                              claimed_p1 is not None or backend == "xenia",
+                              alert,
                               layout=layout_for(backend),
                               wiiu=("pro" if p1_pro else "gamepad")
                               if backend == "cemu" else None)
@@ -5567,7 +5737,8 @@ def main():
                 # Claim Player 1. Deliberately one-shot: without the lock a
                 # second player could keep taking the slot back, which is
                 # exactly the game a sibling will play.
-                if (not claimed_p1 and btn in (BTN_LSTICK, BTN_RSTICK)
+                if (not claimed_p1 and backend != "xenia"
+                        and btn in (BTN_LSTICK, BTN_RSTICK)
                         and BTN_LSTICK in pad.held and BTN_RSTICK in pad.held):
                     claimed_p1 = pad.key
                     pads = resolve_slots(pads, slots, claimed_p1)
@@ -5644,6 +5815,8 @@ def main():
                 problems = write_xemu_config(cfg_path, pads)
             elif backend == "pcsx2":
                 problems = write_pcsx2_config(cfg_path, pads, app_id, exe)
+            elif backend == "xenia":
+                problems = write_xenia_config(cfg_path, pads, sdl)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:

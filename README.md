@@ -35,6 +35,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | **DuckStation** | AppImage | all four players' bindings, as DualShocks with rumble — and turns the multitap on for three or more — needs Steam Input **on** |
 | **xemu** | flatpak | all four players' bindings, as Xbox controllers, by each pad's own id |
 | **PCSX2** | flatpak | all four players' bindings, as DualShock 2s with rumble — and turns the multitap on for three or more |
+| **Xenia Canary** | AppImage | no player settings exist in Xenia, so the check screen shows the seating Xenia itself will use (Steam's controller order); writes a mirrored button mapping for pads that need one |
 
 ## Requirements
 
