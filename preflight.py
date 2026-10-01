@@ -2861,7 +2861,10 @@ def write_rmg_config(cfg_path, pads, app_id=None, exe=None):
             rows = [("PluggedIn", True), ("DeviceType", 4),
                     ("DeviceName", name), ("DevicePath", path),
                     ("DeviceSerial", serial), ("Deadzone", 9),
-                    ("Sensitivity", 100), ("Pak", 0),
+                    # Rumble Pak (N64ControllerPak 1) rather than the Memory
+                    # Pak RMG defaults to: most games save on the cartridge,
+                    # and the user wants the pads to rumble (2026-10-01).
+                    ("Sensitivity", 100), ("Pak", 1),
                     ("RemoveDuplicateMappings", True),
                     ("FilterEventsForButtons", True),
                     ("FilterEventsForAxis", True)]
@@ -2967,8 +2970,11 @@ def write_m64py_config(cfg_path, pads, sdl):
         if pad.swap_faces and not native_n64(pad):
             table = dict(table, **{"A Button": table["B Button"],
                                    "B Button": table["A Button"]})
+        # plugin 5 is the Rumble Pak (1 none, 2 Memory Pak, 4 Transfer Pak):
+        # rumble on by default, as on RMG.
         rows = [("mode", 0), ("device", index),
-                ("name", pad.gc_name or pad.name or ""), ("plugged", True)]
+                ("name", pad.gc_name or pad.name or ""), ("plugged", True),
+                ("plugin", 5)]
         for control, (el, half) in table.items():
             bound = _m64_binding(elements[el], half) if el in elements else None
             rows.append((control, bound or ""))
