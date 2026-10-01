@@ -1136,6 +1136,13 @@ def resolve_slots(pads, st, claimed_p1=None):
 
     if st.get("by_player_index"):
         return _slots_by_player_index(pads, st)
+    if st.get("by_sdl_order"):
+        # shadPS4: seats in the order SDL lists the pads, packed, with no way
+        # to say otherwise — so the bays show exactly that.
+        order = sorted(pads, key=lambda q: q.index)
+        for i, p in enumerate(order):
+            p.slot = i + 1 if i < MAX_PLAYERS else None
+        return order
     order = sorted(pads, key=lambda q: (0 if q.key == claimed_p1 else 1,
                                         st["order"][q.key]))
     for i, p in enumerate(order):
@@ -1407,6 +1414,7 @@ BACKENDS = {
     "pcsx2": ("pcsx2",),
     "xenia": ("xenia",),
     "flycast": ("flycast",),
+    "shadps4": ("shadps4",),
 }
 
 
@@ -2546,6 +2554,92 @@ def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
     stamp = time.strftime("%Y%m%d-%H%M%S")
     shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"PCSX2.{stamp}.ini"))
     write_ini(cfg_path, out)
+    return []
+
+
+# ----------------------------------------------------------------- shadps4
+
+# Read out of shadPS4 v0.18.0's source (src/input/controller.cpp,
+# src/input/input_handler.{h,cpp}):
+#
+# * Seating: TryOpenSDLControllers walks SDL_GetGamepads() in order and gives
+#   each pad the next free seat, 1-4. No setting, so the bays follow SDL's
+#   order (resolve_slots' by_sdl_order) and the P1 claim is off, as on Xenia.
+#   SDL3 is static in the binary; the Flycast measurement showed SDL3 lists
+#   Steam's pads in the same order as ours.
+# * Bindings: input_config/default.ini (the unified config, which is what
+#   use_unified_input_config selects), "output = input", where a controller
+#   input is named by PlayStation POSITION — "cross" is SDL's South. A line
+#   with no ":N" applies to all four seats; "cross:2 = circle:2" to seat 2
+#   only. So the four face lines are written per seat, and the PlayStation
+#   rule (positional_swap) decides each seat on its own.
+SHADPS4_APP_ID = "net.shadps4.shadPS4"
+SHADPS4_FACES = ("cross", "circle", "square", "triangle")
+SHADPS4_MIRROR = {"cross": "circle", "circle": "cross",
+                  "square": "triangle", "triangle": "square"}
+SHADPS4_BEGIN = "# --- preflight begin: face buttons per seat, rewritten every launch ---"
+SHADPS4_END = "# --- preflight end ---"
+
+
+def find_shadps4_config(app_id=None, exe=None):
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        if os.path.isdir(os.path.join(base, "user")):
+            return os.path.join(base, "user", "input_config", "default.ini")
+        return os.path.expanduser(
+            "~/.local/share/shadPS4/input_config/default.ini")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or SHADPS4_APP_ID}/data/shadPS4/input_config/default.ini")
+
+
+def write_shadps4_config(cfg_path, pads):
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)[:4]
+    if not assigned:
+        return ["no controllers assigned"]
+    if not os.path.isfile(cfg_path):
+        return ["shadPS4's input config was not found — run shadPS4 once first."]
+    seats = {p.slot: p for p in assigned}
+    block = [SHADPS4_BEGIN]
+    for n in range(1, 5):
+        pad = seats.get(n)
+        mirror = bool(pad and positional_swap(pad))
+        if pad:
+            print(f"shadps4: P{n} {pad.label}"
+                  f"{' (faces mirrored)' if mirror else ''}", flush=True)
+        for face in SHADPS4_FACES:
+            src = SHADPS4_MIRROR[face] if mirror else face
+            block.append(f"{face}:{n} = {src}:{n}")
+    block.append(SHADPS4_END)
+
+    with open(cfg_path) as fh:
+        lines = fh.read().splitlines()
+    out, inside = [], False
+    for line in lines:
+        if line == SHADPS4_BEGIN:
+            inside = True
+            continue
+        if line == SHADPS4_END:
+            inside = False
+            continue
+        if inside:
+            continue
+        # The shipped "cross = cross" lines apply to every seat and would
+        # land alongside ours, so a mirrored seat would answer both buttons.
+        # Keyboard lines ("cross = n") stay.
+        out_name, eq, src = line.partition("=")
+        if eq and out_name.split(":")[0].strip() in SHADPS4_FACES and \
+                src.split(":")[0].strip() in SHADPS4_FACES:
+            continue
+        out.append(line)
+    while out and not out[-1].strip():
+        out.pop()
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"shadps4-default.{stamp}.ini"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(out + [""] + block) + "\n")
+    os.replace(tmp, cfg_path)
     return []
 
 
@@ -5380,7 +5474,7 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "gopher64": "n64", "duckstation": "playstation",
                   "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox",
-                  "flycast": "dreamcast"}
+                  "flycast": "dreamcast", "shadps4": "playstation"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -5544,6 +5638,8 @@ BACKEND_ENV = {
     "xenia": (VIRTUAL_PAD_HINT,),
     # Flycast's flatpak runs the runtime's sdl2-compat: the same hiding.
     "flycast": (VIRTUAL_PAD_HINT,),
+    # shadPS4 builds SDL3 in statically: the same hiding.
+    "shadps4": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -5665,6 +5761,8 @@ def main():
         cfg_path = find_xenia_config(exe)
     elif backend == "flycast":
         cfg_path = find_flycast_config(app_id, exe)
+    elif backend == "shadps4":
+        cfg_path = find_shadps4_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -5675,6 +5773,7 @@ def main():
     slots = new_slot_state()
     # Xenia seats pads itself, by SDL player index; show its seating.
     slots["by_player_index"] = backend == "xenia"
+    slots["by_sdl_order"] = backend == "shadps4"
     pads, unmapped = scan_pads(sdl)
     apply_known(pads, known)
     pads = resolve_slots(pads, slots)
@@ -5842,7 +5941,8 @@ def main():
             if sig != last_sig:
                 last_sig = sig
                 draw_pad_grid(ui, pads, cycle, warnings, needed, holds,
-                              claimed_p1 is not None or backend == "xenia",
+                              claimed_p1 is not None
+                              or backend in ("xenia", "shadps4"),
                               alert,
                               layout=layout_for(backend),
                               wiiu=("pro" if p1_pro else "gamepad")
@@ -5946,7 +6046,7 @@ def main():
                 # Claim Player 1. Deliberately one-shot: without the lock a
                 # second player could keep taking the slot back, which is
                 # exactly the game a sibling will play.
-                if (not claimed_p1 and backend != "xenia"
+                if (not claimed_p1 and backend not in ("xenia", "shadps4")
                         and btn in (BTN_LSTICK, BTN_RSTICK)
                         and BTN_LSTICK in pad.held and BTN_RSTICK in pad.held):
                     claimed_p1 = pad.key
@@ -6028,6 +6128,8 @@ def main():
                 problems = write_xenia_config(cfg_path, pads, sdl)
             elif backend == "flycast":
                 problems = write_flycast_config(cfg_path, pads)
+            elif backend == "shadps4":
+                problems = write_shadps4_config(cfg_path, pads)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:

@@ -695,6 +695,15 @@ No face mirroring yet: Flycast remaps per device NAME, and every Steam
 virtual pad has the same one. Check screen uses the Xbox map (same letter
 positions as a Dreamcast pad).
 
+**shadPS4, as of 2026-10-01.** From v0.18.0's source. No seating setting:
+`TryOpenSDLControllers` gives pads seats 1-4 in `SDL_GetGamepads()` order,
+packed, so the bays follow SDL order (`by_sdl_order`) and P1 claim is off.
+Bindings live in `input_config/default.ini` (unified config) as
+`output = input`, controller inputs named by PlayStation POSITION; a line
+without `:N` applies to every seat. preflight drops the shipped controller
+face lines and writes a marked block of per-seat lines (`cross:2 =
+circle:2`), each seat decided by `positional_swap`.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No
