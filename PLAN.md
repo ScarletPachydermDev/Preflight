@@ -682,6 +682,19 @@ mirroring, a/b and x/y exchanged. The AppImage (DwarFS) carries sdl2-compat
 2.32.70 on SDL 3.4.14 built against a newer glibc than SteamOS, so it cannot
 be loaded from outside; Xenia's own log is the check.
 
+**Flycast, as of 2026-10-01.** From v2.7's source. A pad's port is
+`[input] maple_sdl_joystick_<SDL instance id>` in emu.cfg — the id is just
+SDL's opening order in that run, so every old seat is dropped and each
+device present gets one (`-1` keeps it out). Only port A has a controller
+by default (`device1 = 0`, `device2-4 = 10`), so used ports are switched on.
+Flycast's flatpak SDL (sdl2-compat 2.32.70) gave the same index, instance
+and GUID per device as SteamOS's SDL2, so the list is read with ours, at
+write time, in our environment: outside a Steam launch the real devices
+show up beside their virtual pads (five devices for three controllers).
+No face mirroring yet: Flycast remaps per device NAME, and every Steam
+virtual pad has the same one. Check screen uses the Xbox map (same letter
+positions as a Dreamcast pad).
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No

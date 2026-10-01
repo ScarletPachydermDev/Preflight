@@ -33,6 +33,7 @@ hardware, not guesses:
 import collections
 import copy
 import ctypes
+import ctypes.util
 import select
 import struct
 import json
@@ -1405,6 +1406,7 @@ BACKENDS = {
     "xemu": ("xemu",),
     "pcsx2": ("pcsx2",),
     "xenia": ("xenia",),
+    "flycast": ("flycast",),
 }
 
 
@@ -2543,6 +2545,132 @@ def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
     os.makedirs(BACKUP_DIR, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"PCSX2.{stamp}.ini"))
+    write_ini(cfg_path, out)
+    return []
+
+
+# ---------------------------------------------------------------- flycast
+
+# Read out of Flycast v2.7's source (core/input/gamepad_device.cpp,
+# core/sdl/sdl.cpp, core/sdl/sdl_gamepad.cpp, core/cfg/option.cpp,
+# core/hw/maple/maple_cfg.h):
+#
+# * A pad's player port is [input] maple_<unique id> in emu.cfg, and an SDL
+#   pad's unique id is "sdl_joystick_<SDL instance id>" — not anything about
+#   the controller, just the order SDL opened it in this run. With nothing
+#   saved, the Nth pad opened takes port N. Port -1 keeps a pad out.
+# * Only port A has a controller by default: [input] device1 = 0
+#   (MDT_SegaController), device2-4 = 10 (MDT_None). Players 2-4 need their
+#   port turned on or they press buttons into nothing.
+#
+# Measured on the machine, 2026-10-01: listing the pads INSIDE Flycast's
+# flatpak (runtime sdl2-compat 2.32.70) gave the same index, instance id and
+# GUID for every device as SteamOS's own SDL2 does. So the ids are read with
+# ours, in OUR environment at write time — which matters, because Steam hides
+# the real devices behind its virtual pads only in a process it launched:
+# outside a game the same machine lists five devices for three controllers.
+FLYCAST_APP_ID = "org.flycast.Flycast"
+FLYCAST_CONTROLLER, FLYCAST_NONE = 0, 10
+
+FLYCAST_ENUM = r"""
+import ctypes, sys
+sdl = ctypes.CDLL(sys.argv[1])
+class G(ctypes.Structure):
+    _fields_ = [("d", ctypes.c_uint8 * 16)]
+sdl.SDL_SetHint(b"SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD", b"1")
+sdl.SDL_Init(0x00000200 | 0x00002000)
+sdl.SDL_JoystickGetDeviceGUID.restype = G
+sdl.SDL_JoystickGetDeviceGUID.argtypes = [ctypes.c_int]
+sdl.SDL_JoystickGetGUIDString.argtypes = [G, ctypes.c_char_p, ctypes.c_int]
+for i in range(sdl.SDL_NumJoysticks()):
+    b = ctypes.create_string_buffer(33)
+    sdl.SDL_JoystickGetGUIDString(sdl.SDL_JoystickGetDeviceGUID(i), b, 33)
+    print(sdl.SDL_JoystickGetDeviceInstanceID(i), b.value.decode(), sep="\t")
+sdl.SDL_Quit()
+"""
+
+
+def find_flycast_config(app_id=None, exe=None):
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        if os.path.isfile(os.path.join(base, "emu.cfg")):
+            return os.path.join(base, "emu.cfg")
+        return os.path.expanduser("~/.config/flycast/emu.cfg")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or FLYCAST_APP_ID}/config/flycast/emu.cfg")
+
+
+def flycast_joysticks():
+    """[(instance id, guid)] as a fresh SDL process opens them, here."""
+    lib = ctypes.util.find_library("SDL2-2.0") or "libSDL2-2.0.so.0"
+    env = dict(os.environ, SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD="1")
+    try:
+        out = subprocess.run([sys.executable, "-c", FLYCAST_ENUM, lib],
+                             env=env, capture_output=True, text=True,
+                             timeout=30)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    rows = []
+    for line in out.stdout.splitlines():
+        bits = line.split("\t")
+        if len(bits) == 2 and bits[0].lstrip("-").isdigit():
+            rows.append((int(bits[0]), bits[1]))
+    return rows if out.returncode == 0 else None
+
+
+def write_flycast_config(cfg_path, pads):
+    """Seat each pad on its Dreamcast port by SDL instance id, keep every
+    other device out, and plug a controller into each used port."""
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)[:4]
+    if not assigned:
+        return ["no controllers assigned"]
+    joys = flycast_joysticks()
+    if not joys:
+        return ["could not list the controllers the way Flycast will"]
+
+    seat, problems, used = {}, [], set()
+    for pad in assigned:
+        hit = next((inst for inst, guid in joys
+                    if guid == pad.sdl_guid and inst not in used), None)
+        if hit is None:
+            problems.append(f"{pad.label}: not among the devices Flycast "
+                            f"will open")
+            continue
+        used.add(hit)
+        seat[hit] = pad.slot - 1
+        print(f"flycast: P{pad.slot} {pad.label} -> port {pad.slot - 1} "
+              f"= sdl_joystick_{hit}", flush=True)
+    if problems:
+        return problems
+
+    values = {}
+    for inst, _guid in joys:
+        values[f"maple_sdl_joystick_{inst}"] = str(seat.get(inst, -1))
+    for n in range(1, 5):
+        values[f"device{n}"] = str(FLYCAST_CONTROLLER if n <= len(assigned)
+                                   else FLYCAST_NONE)
+
+    sections = read_ini(cfg_path) if os.path.isfile(cfg_path) else []
+    if sections is None:
+        return ["cannot read emu.cfg"]
+    out, done = [], False
+    for name, rows in sections:
+        if name == "input":
+            # Drop every old seat: instance ids are per run, so yesterday's
+            # maple_sdl_joystick_5 is nobody today.
+            rows = [(k, v) for k, v in rows
+                    if not k.startswith("maple_sdl_joystick_")
+                    and k not in values]
+            rows += list(values.items())
+            done = True
+        out.append((name, rows))
+    if not done:
+        out.append(("input", list(values.items())))
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    if os.path.isfile(cfg_path):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"emu.{stamp}.cfg"))
     write_ini(cfg_path, out)
     return []
 
@@ -5189,7 +5317,8 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 # which is also what an unrecognised target falls back to.
 BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "gopher64": "n64", "duckstation": "playstation",
-                  "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox"}
+                  "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox",
+                  "flycast": "xbox"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -5351,6 +5480,8 @@ BACKEND_ENV = {
     "pcsx2": (VIRTUAL_PAD_HINT,),
     # Xenia's AppImage runs sdl2-compat on SDL 3.4: the same hiding.
     "xenia": (VIRTUAL_PAD_HINT,),
+    # Flycast's flatpak runs the runtime's sdl2-compat: the same hiding.
+    "flycast": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -5470,6 +5601,8 @@ def main():
         cfg_path = find_pcsx2_config(app_id, exe)
     elif backend == "xenia":
         cfg_path = find_xenia_config(exe)
+    elif backend == "flycast":
+        cfg_path = find_flycast_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -5828,6 +5961,8 @@ def main():
                 problems = write_pcsx2_config(cfg_path, pads, app_id, exe)
             elif backend == "xenia":
                 problems = write_xenia_config(cfg_path, pads, sdl)
+            elif backend == "flycast":
+                problems = write_flycast_config(cfg_path, pads)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:
