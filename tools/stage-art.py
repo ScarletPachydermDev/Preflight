@@ -717,6 +717,55 @@ def dreamcast(pack):
     return 6
 
 
+# The Vita handheld: the whole device as line art, drawn for preflight on the
+# design canvas from a reference outline and redrawn in our own lines (the
+# reference's licence is unknown; Sony's logos and wordmark are left out).
+# Only what never lights goes in the picture — body, shoulders, screen, the
+# two button dishes, the PS button's oval. The d-pad, faces, sticks, L/R and
+# Select/Start are the PlayStation glyphs, drawn over it where the
+# VITA_ANCHORS in preflight.py put them (same viewBox).
+VITA_DIR = os.path.join(SWITCH_DIR, "vita")
+VITA_VIEWBOX = (100, 60, 1110, 525)
+VITA_HEAD = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" width="{w}" height="{h}"
+ fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">"""
+VITA_BODY = """
+<path stroke-width="6" d="M325 80 L985 80 C1010 80 1020 125 1060 128 L1118 128 C1180 170 1200 260 1195 330 C1190 430 1150 520 1060 555 C1020 568 990 570 965 570 L345 570 C320 570 290 568 250 555 C160 520 120 430 115 330 C110 260 130 170 192 128 L250 128 C290 125 300 80 325 80 Z"/>
+<g stroke-width="3.5">
+<rect x="325" y="115" width="655" height="375" rx="2"/>
+<path d="M262 297 C292 270 300 215 268 186 C236 156 180 158 155 196 C135 228 145 280 182 302 C200 312 212 320 207 336 C198 350 196 362 197 375 C198 405 220 425 247 425 C274 425 297 404 297 375 C297 352 283 333 264 326 C252 320 252 305 262 297 Z"/>
+<path d="M1043 297 C1013 270 1005 215 1037 186 C1069 156 1125 158 1150 196 C1170 228 1160 280 1123 302 C1105 312 1093 320 1098 336 C1107 350 1109 362 1108 375 C1107 405 1085 425 1058 425 C1031 425 1008 404 1008 375 C1008 352 1022 333 1041 326 C1053 320 1053 305 1043 297 Z"/>
+</g>"""
+# The controls that light by themselves rather than through a glyph: each is
+# its own pair of layers the size of the whole picture — outline, and filled
+# for a press — so it lands exactly on the body with no placing to do. The
+# shoulders are the crescent between the arc over each step and the step.
+VITA_PARTS = {
+    "l": "M196 121 Q240 92 304 81 C298 98 288 124 250 128 L196 128 Z",
+    "r": "M1114 121 Q1070 92 1006 81 C1012 98 1022 124 1060 128 L1114 128 Z",
+    "ps": "M198 471 A36 17 0 1 0 270 471 A36 17 0 1 0 198 471 Z",
+    "select": "M1024 469 A22 10 0 1 0 1068 469 A22 10 0 1 0 1024 469 Z",
+    "start": "M1081 469 A22 10 0 1 0 1125 469 A22 10 0 1 0 1081 469 Z",
+}
+
+
+def vita():
+    """The Vita outline and its lit parts, rendered here. Needs cairosvg
+    (dev only); the PNGs are committed."""
+    import cairosvg
+    os.makedirs(VITA_DIR, exist_ok=True)
+    x, y, w, h = VITA_VIEWBOX
+    head = VITA_HEAD.format(vb=f"{x} {y} {w} {h}", w=w * 2, h=h * 2)
+
+    def render(body, name):
+        cairosvg.svg2png(bytestring=(head + body + "</svg>").encode(),
+                         write_to=os.path.join(VITA_DIR, name + ".png"))
+    render(VITA_BODY, "body")
+    for key, d in VITA_PARTS.items():
+        render(f'<path stroke-width="3.5" d="{d}"/>', key)
+        render(f'<path stroke-width="3.5" fill="#ffffff" d="{d}"/>', key + "_on")
+    return 1 + 2 * len(VITA_PARTS)
+
+
 def xbox(pack):
     """The Xbox set, from the pack — ps() in another family."""
     os.makedirs(XBOX_DIR, exist_ok=True)
@@ -756,7 +805,7 @@ def main():
     licence = os.path.join(pack, "License.txt")
     if not os.path.isdir(os.path.join(pack, GC_PACK)):
         sys.exit(f"no {GC_PACK} in {pack}")
-    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack) + dreamcast(pack)
+    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack) + dreamcast(pack) + vita()
     derived = switch_faces()
     if os.path.isfile(licence):
         shutil.copyfile(licence, os.path.join(SWITCH_DIR, "LICENSE-kenney.txt"))

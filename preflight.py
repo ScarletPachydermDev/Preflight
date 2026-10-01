@@ -5901,6 +5901,130 @@ def glyph_bar(ui, items, hidden=()):
             _draw_glyph_item(ui, item, x, y_mid, size, bold=(i == 0))
 
 
+# ------------------------------------------------------------- handhelds
+
+# A handheld game has one player, so its screen is one big picture of the
+# console rather than four bays: the device drawn whole (art/<layout>/body.png,
+# from stage-art.py) with the ordinary glyphs over its buttons, lit by the pad
+# that controls it. Which pad that is, any player decides with L3+R3 — "claim
+# handheld", always on offer, never spent — and the choice is remembered by
+# the pad's hardware id for the next session (handheld_owner).
+HANDHELD_LAYOUTS = {"vita"}
+HANDHELD_OWNERS = os.path.join(STATE_DIR, "handheld.json")
+
+# Where each control sits, in the outline's own viewBox (stage-art.py's
+# VITA_VIEWBOX: 100, 60, 1110 x 525), with its size in the same units.
+VITA_VIEWBOX = (100.0, 60.0, 1110.0, 525.0)
+VITA_ANCHORS = {
+    "dpad": (217, 244, 150), "stick_l": (247, 375, 78),
+    "stick_r": (1058, 375, 78), "faces": (1091, 244, 0),
+    "start": (1103, 469, 30), "select": (1046, 469, 30),
+}
+# The parts of the drawing that light by themselves (stage-art's VITA_PARTS),
+# each a layer the size of the body.
+VITA_LIT = (("l", BTN_LSHOULDER), ("r", BTN_RSHOULDER), ("ps", BTN_GUIDE),
+            ("select", BTN_BACK), ("start", BTN_START))
+
+
+def _ps_face_metrics(ui):
+    """(button size, spread) of the PS2/PS3 screens' face cluster, in pixels
+    — the four-bay pad strip worked out the way draw_pad_grid lays it, so a
+    player sees the same buttons the same distance apart on either screen."""
+    gw, gh, gap = ui.w * 0.90, ui.h * 0.63, ui.w * 0.015
+    cw, ch = (gw - gap) / 2, (gh - gap) / 2
+    dh = min(ch * 0.70, cw * 0.92 / PAD_ASPECT)
+    return dh * 0.30, dh * 0.215
+
+
+def handheld_owner(layout):
+    """The hardware key of the pad that last claimed this handheld."""
+    return (load_json(HANDHELD_OWNERS, {}) or {}).get(layout)
+
+
+def save_handheld_owner(layout, pad):
+    """Remember who claimed — only by a key that is the pad itself, never a
+    Steam slot (see is_hardware_key)."""
+    key = pad.store_key
+    if not is_hardware_key(key):
+        print(f"claim: {pad.label} has no hardware id yet; claim kept for this "
+              f"session only", flush=True)
+        return
+    owners = load_json(HANDHELD_OWNERS, {}) or {}
+    owners[layout] = key
+    tmp = HANDHELD_OWNERS + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(owners, fh, indent=2, sort_keys=True)
+    os.replace(tmp, HANDHELD_OWNERS)
+    print(f"claim: {pad.label} controls the {layout} handheld (remembered)",
+          flush=True)
+
+
+def draw_handheld(ui, pads, holds, layout, alert=None):
+    """The handheld screen: the console, big and centred, lit by P1."""
+    draw_frame(ui, "Controller check",
+               "Controllers must be paired in your OS first — "
+               "test your inputs before the game starts", emoji="\U0001F6A7",
+               alert=alert)
+    pad = next((p for p in pads if p.slot == 1), None)
+    col = player_color(1) if pad else DIM
+    vx, vy, vw, vh = VITA_VIEWBOX
+    bw = ui.w * 0.80
+    bh = bw * vh / vw
+    if bh > ui.h * 0.62:
+        bh = ui.h * 0.62
+        bw = bh * vw / vh
+    bx, by = (ui.w - bw) / 2, ui.h * 0.19
+    k = bw / vw
+    ui.image(art(layout + "/body"), bx, by, bw, bh,
+             color=blend(BG, FG, 0.55) if pad else blend(BG, FG, 0.25))
+
+    g = Bay(ui, bx, by, bw, bh, col, BG, pad is None, art="ps/")
+    held = pad.held if pad else set()
+    axes = pad.axes if pad else {}
+
+    def at(name):
+        x, y, size = VITA_ANCHORS[name]
+        return bx + (x - vx) * k, by + (y - vy) * k, size * k
+
+    # The shoulders, Select, Start and the PS button are the drawing's own
+    # shapes, lit where they are rather than replaced by a glyph.
+    for name, btn in VITA_LIT:
+        lit = btn in held
+        ui.image(art(f"{layout}/{name}" + ("_on" if lit else "")),
+                 bx, by, bw, bh,
+                 color=col if lit else blend(BG, FG, 0.55 if pad else 0.25))
+
+    cx, cy, side = at("dpad")
+    dpad_arms(g, cx, cy, side, held)
+    swap = positional_swap(pad) if pad else False
+    live = face_live(held, swap)
+    fside, fspread = _ps_face_metrics(ui)
+    fx0, fy0, _ = at("faces")
+    for letter, name, dx, dy in PS_FACES:
+        g.face(name, fx0 + dx * fspread, fy0 + dy * fspread, fside,
+               pressed=letter in live, wys=True if pad else None)
+    for name, btn, ax, ay in (("stick_l", BTN_LSTICK, 0, 1),
+                              ("stick_r", BTN_RSTICK, 2, 3)):
+        sx, sy, ss = at(name)
+        stick(g, sx, sy, ss, ss * 0.22, axes, ax, ay, name, btn in held)
+    for name, btn in (("select", BTN_BACK), ("start", BTN_START)):
+        gx, gy, gs = at(name)
+        hold = (holds.get(pad.key) or {}).get(btn, 0.0) if pad else 0.0
+        if hold > 0:
+            hold_ring(ui, gx, gy, gs, hold, FG if btn == BTN_BACK
+                      else col, g.track)
+
+    label = pad.label if pad else "— no controller —"
+    ui.text(label, ui.w // 2, int(by + bh + ui.h * 0.025), "body",
+            FG if pad else blend(BG, DIM, 0.75), center=True)
+
+    glyph_bar(ui, [
+        (["ps:start"], "P1", player_color(1), "hold to start"),
+        (["L3", "sep+", "R3"], None, None, "claim handheld"),
+        (["ps:select"], None, FG, "hold to quit"),
+    ])
+
+
 def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
                   alert=None, layout="switch", wiiu=None):
     draw_frame(ui, "Controller check",
@@ -6412,6 +6536,16 @@ def main():
 
     state = "roster"
     claimed_p1 = None       # key of the pad that took P1; one claim per session
+    # A handheld's remembered owner takes P1 as soon as it is recognised:
+    # here when it is its own hardware (Steam Input off), else on pairing.
+    owner_key = (handheld_owner(layout_for(backend))
+                 if layout_for(backend) in HANDHELD_LAYOUTS else None)
+    if owner_key:
+        mine = next((p for p in pads if p.store_key == owner_key), None)
+        if mine is not None:
+            claimed_p1 = mine.key
+            pads = resolve_slots(pads, slots, claimed_p1)
+            label_pads(pads)
     last_sig = None         # what was last painted, so we can skip redraws
     result = None
     cycle = RumbleCycle(sdl)
@@ -6562,7 +6696,11 @@ def main():
                    cycle.active,
                    tuple((k, tuple(sorted(v.items()))) for k, v in sorted(holds.items())),
                    tuple(warnings), claimed_p1, alert, p1_pro)
-            if sig != last_sig:
+            if sig != last_sig and layout_for(backend) in HANDHELD_LAYOUTS:
+                last_sig = sig
+                draw_handheld(ui, pads, holds, layout_for(backend), alert)
+                ui.present()
+            elif sig != last_sig:
                 last_sig = sig
                 draw_pad_grid(ui, pads, cycle, warnings, needed, holds,
                               claimed_p1 is not None
@@ -6634,6 +6772,13 @@ def main():
                     if hit:
                         bind_real(pad, hit, known, pads)
                         label_pads(pads)
+                        if (owner_key and claimed_p1 is None
+                                and pad.store_key == owner_key):
+                            claimed_p1 = pad.key
+                            pads = resolve_slots(pads, slots, claimed_p1)
+                            label_pads(pads)
+                            print(f"claim: {pad.label} is the remembered "
+                                  f"handheld owner", flush=True)
                         # A successful match used to log nothing, which made
                         # a wrong one invisible: the only trace was another
                         # pad reporting "already claimed" against a device
@@ -6670,6 +6815,17 @@ def main():
                 # Claim Player 1. Deliberately one-shot: without the lock a
                 # second player could keep taking the slot back, which is
                 # exactly the game a sibling will play.
+                # On a handheld it is "claim handheld": never spent, so the
+                # pad that should drive the console can always take it, and
+                # remembered for next time.
+                if (layout_for(backend) in HANDHELD_LAYOUTS
+                        and btn in (BTN_LSTICK, BTN_RSTICK)
+                        and BTN_LSTICK in pad.held and BTN_RSTICK in pad.held):
+                    claimed_p1 = pad.key
+                    pads = resolve_slots(pads, slots, claimed_p1)
+                    label_pads(pads)
+                    save_handheld_owner(layout_for(backend), pad)
+                    continue
                 if (not claimed_p1 and backend not in ("xenia", "shadps4")
                         and btn in (BTN_LSTICK, BTN_RSTICK)
                         and BTN_LSTICK in pad.held and BTN_RSTICK in pad.held):
