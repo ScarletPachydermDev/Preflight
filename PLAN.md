@@ -729,6 +729,14 @@ RMG's default is unplugged with nothing mapped, so the
 whole N64 layout is written (gopher64's), as `;`-separated type/data/extra
 lists; a native N64 pad gets its own C buttons and Z.
 
+**M64Py, as of 2026-10-01.** The stock mupen64plus-input-sdl plugin
+(`src/config.c`): `[Input-SDL-ControlN]` in mupen64plus.cfg, switched to
+mode 0 (fully manual) with `device` an SDL joystick INDEX and raw bindings —
+`button(N)`, `axis(N+)`, `hat(H Up)`, `axis(0-,0+)` for a stick. The flatpak
+has SDL 2.32.10 and lists pads in the same order with the same GUIDs as
+ours, so the index is taken at write time like Flycast's. Raw numbers come
+from each pad's own SDL mapping. `_write_mupen_cfg` is shared with RMG.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No

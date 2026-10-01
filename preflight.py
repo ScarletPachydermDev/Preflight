@@ -1417,6 +1417,7 @@ BACKENDS = {
     "shadps4": ("shadps4",),
     "bigpemu": ("bigpemu",),
     "rmg": ("rosalie241.rmg", "rmg"),
+    "m64py": ("m64py",),
 }
 
 
@@ -2669,6 +2670,48 @@ def _rmg_quote(v):
     return '"' + str(v).replace('"', "") + '"'
 
 
+def _write_mupen_cfg(cfg_path, sections, backup_name):
+    """Set these keys in these [sections] of a mupen64plus.cfg, keeping every
+    other line — comments included — and every other section."""
+    # mupen64plus.cfg: [Section] blocks of "Key = value". Ours replace only
+    # the keys we set; everything else in those sections, and every other
+    # section, is kept.
+    text = open(cfg_path).read() if os.path.isfile(cfg_path) else ""
+    blocks, order = {}, []
+    cur = None
+    for line in text.splitlines():
+        st = line.strip()
+        if st.startswith("[") and st.endswith("]"):
+            cur = st[1:-1]
+            order.append(cur)
+            blocks[cur] = []
+        elif cur is not None:
+            blocks[cur].append(line)
+        else:
+            blocks.setdefault(None, []).append(line)
+    for name, rows in sections.items():
+        if name not in blocks:
+            order.append(name)
+            blocks[name] = []
+        keys = {k for k, _ in rows}
+        kept = [l for l in blocks[name]
+                if l.split("=", 1)[0].strip() not in keys and l.strip()]
+        blocks[name] = kept + [f"{k} = {_rmg_quote(v)}" for k, v in rows]
+    out = list(blocks.get(None, []))
+    for name in order:
+        out += [f"[{name}]", ""] + blocks[name] + [""]
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    if os.path.isfile(cfg_path):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"{backup_name}.{stamp}.cfg"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(out).rstrip("\n") + "\n")
+    os.replace(tmp, cfg_path)
+    return []
+
+
 def write_rmg_config(cfg_path, pads, app_id=None, exe=None):
     assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)[:4]
     if not assigned:
@@ -2716,43 +2759,115 @@ def write_rmg_config(cfg_path, pads, app_id=None, exe=None):
                   f"'{name}' {path}", flush=True)
         sections[RMG_SECTION.format(n)] = rows
 
-    # mupen64plus.cfg: [Section] blocks of "Key = value". Ours replace only
-    # the keys we set; everything else in those sections, and every other
-    # section, is kept.
-    text = open(cfg_path).read() if os.path.isfile(cfg_path) else ""
-    blocks, order = {}, []
-    cur = None
-    for line in text.splitlines():
-        st = line.strip()
-        if st.startswith("[") and st.endswith("]"):
-            cur = st[1:-1]
-            order.append(cur)
-            blocks[cur] = []
-        elif cur is not None:
-            blocks[cur].append(line)
-        else:
-            blocks.setdefault(None, []).append(line)
-    for name, rows in sections.items():
-        if name not in blocks:
-            order.append(name)
-            blocks[name] = []
-        keys = {k for k, _ in rows}
-        kept = [l for l in blocks[name]
-                if l.split("=", 1)[0].strip() not in keys and l.strip()]
-        blocks[name] = kept + [f"{k} = {_rmg_quote(v)}" for k, v in rows]
-    out = list(blocks.get(None, []))
-    for name in order:
-        out += [f"[{name}]", ""] + blocks[name] + [""]
-    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
-    if os.path.isfile(cfg_path):
-        os.makedirs(BACKUP_DIR, exist_ok=True)
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"mupen64plus.{stamp}.cfg"))
-    tmp = cfg_path + ".tmp"
-    with open(tmp, "w") as fh:
-        fh.write("\n".join(out).rstrip("\n") + "\n")
-    os.replace(tmp, cfg_path)
-    return []
+    return _write_mupen_cfg(cfg_path, sections, "mupen64plus")
+
+
+# ------------------------------------------------------------------ m64py
+
+# M64Py runs mupen64plus with its stock SDL input plugin; read out of
+# mupen64plus-input-sdl's src/config.c and the cfg on the machine. Ports are
+# [Input-SDL-ControlN] in $XDG_CONFIG_HOME/mupen64plus/mupen64plus.cfg; the
+# machine had mode 2 (fully automatic) with port 1 on the keyboard and the
+# rest unplugged. mode 0 is fully manual: `device` is an SDL JOYSTICK INDEX
+# and every control a raw binding — button(N), axis(N+), hat(H Up), and
+# "axis(0-,0+)" for a stick.
+#
+# M64Py's flatpak has SDL 2.32.10, and listing the pads inside it gave the
+# same index and GUID per device as SteamOS's SDL2, so the index is ours,
+# taken at write time in the launch's own environment (flycast_joysticks).
+# Raw numbers are translated from each pad's own SDL mapping, so any pad
+# works, not only Steam's virtual ones. Layout: gopher64's.
+M64PY_APP_ID = "net.sourceforge.m64py.M64Py"
+M64PY_SECTION = "Input-SDL-Control{}"
+# N64 control -> (SDL gamepad element, half) — half "+"/"-" for an axis.
+M64PY_MAP = {
+    "A Button": ("a", None), "B Button": ("b", None),
+    "Start": ("start", None), "Z Trig": ("righttrigger", "+"),
+    "L Trig": ("leftshoulder", None), "R Trig": ("rightshoulder", None),
+    "DPad U": ("dpup", None), "DPad D": ("dpdown", None),
+    "DPad L": ("dpleft", None), "DPad R": ("dpright", None),
+    "C Button U": ("righty", "-"), "C Button D": ("righty", "+"),
+    "C Button L": ("rightx", "-"), "C Button R": ("rightx", "+"),
+}
+M64PY_MAP_NATIVE_N64 = dict(M64PY_MAP, **{
+    "C Button U": ("y", None), "C Button L": ("x", None),
+    "C Button R": ("back", None), "C Button D": ("righttrigger", "+"),
+    "Z Trig": ("lefttrigger", "+")})
+_HAT_DIR = {"1": "Up", "2": "Right", "4": "Down", "8": "Left"}
+
+
+def find_m64py_config(app_id=None, exe=None):
+    if exe:
+        return os.path.expanduser("~/.config/mupen64plus/mupen64plus.cfg")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or M64PY_APP_ID}/config/mupen64plus/mupen64plus.cfg")
+
+
+def _m64_binding(element, half):
+    """One SDL mapping element ("b3", "h0.4", "a5", "+a2", "a1~") as a
+    mupen64plus-input-sdl binding."""
+    el = element.lstrip("+-").rstrip("~")
+    if el.startswith("b") and el[1:].isdigit():
+        return f"button({el[1:]})"
+    if el.startswith("h") and "." in el:
+        hat, _, bit = el[1:].partition(".")
+        return f"hat({hat} {_HAT_DIR.get(bit, 'Up')})"
+    if el.startswith("a") and el[1:].isdigit():
+        sign = half or "+"
+        if element.endswith("~"):
+            sign = "-" if sign == "+" else "+"
+        return f"axis({el[1:]}{sign})"
+    return None
+
+
+def write_m64py_config(cfg_path, pads, sdl):
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)[:4]
+    if not assigned:
+        return ["no controllers assigned"]
+    if not os.path.isfile(cfg_path):
+        return ["M64Py's config was not found — run M64Py once first."]
+    joys = flycast_joysticks()
+    if not joys:
+        return ["could not list the controllers the way M64Py will"]
+
+    sections, used, problems = {}, set(), []
+    for n in range(1, 5):
+        pad = next((p for p in assigned if p.slot == n), None)
+        if pad is None:
+            sections[M64PY_SECTION.format(n)] = [("plugged", False)]
+            continue
+        index = next((i for i, (_inst, guid) in enumerate(joys)
+                      if guid == pad.sdl_guid and i not in used), None)
+        mapping = _pad_mapping(sdl, pad)
+        if index is None or not mapping:
+            problems.append(f"{pad.label}: not among the devices M64Py will open")
+            continue
+        used.add(index)
+        elements = {}
+        for field in mapping.split(",")[2:]:
+            key, sep, val = field.partition(":")
+            if sep:
+                elements[key] = val
+        table = M64PY_MAP_NATIVE_N64 if native_n64(pad) else M64PY_MAP
+        if pad.swap_faces and not native_n64(pad):
+            table = dict(table, **{"A Button": table["B Button"],
+                                   "B Button": table["A Button"]})
+        rows = [("mode", 0), ("device", index),
+                ("name", pad.gc_name or pad.name or ""), ("plugged", True)]
+        for control, (el, half) in table.items():
+            bound = _m64_binding(elements[el], half) if el in elements else None
+            rows.append((control, bound or ""))
+        lx, ly = elements.get("leftx", "a0"), elements.get("lefty", "a1")
+        rows += [("X Axis", f"axis({lx.lstrip('+-').rstrip('~')[1:]}-,"
+                            f"{lx.lstrip('+-').rstrip('~')[1:]}+)"),
+                 ("Y Axis", f"axis({ly.lstrip('+-').rstrip('~')[1:]}-,"
+                            f"{ly.lstrip('+-').rstrip('~')[1:]}+)")]
+        sections[M64PY_SECTION.format(n)] = rows
+        print(f"m64py: P{n} {pad.label} -> Control{n} = SDL joystick {index}",
+              flush=True)
+    if problems:
+        return problems
+    return _write_mupen_cfg(cfg_path, sections, "m64py-mupen64plus")
 
 
 # ---------------------------------------------------------------- bigpemu
@@ -5845,7 +5960,7 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "gopher64": "n64", "duckstation": "playstation",
                   "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox",
                   "flycast": "dreamcast", "shadps4": "playstation",
-                  "bigpemu": "xbox", "rmg": "n64"}
+                  "bigpemu": "xbox", "rmg": "n64", "m64py": "n64"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -6015,6 +6130,8 @@ BACKEND_ENV = {
     "bigpemu": (VIRTUAL_PAD_HINT,),
     # RMG's flatpak runs the KDE runtime's SDL 3.2: the same hiding.
     "rmg": (VIRTUAL_PAD_HINT,),
+    # M64Py's flatpak has SDL 2.32.10: the same hiding.
+    "m64py": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -6142,6 +6259,8 @@ def main():
         cfg_path = find_bigpemu_config(app_id, exe)
     elif backend == "rmg":
         cfg_path = find_rmg_config(app_id, exe)
+    elif backend == "m64py":
+        cfg_path = find_m64py_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -6513,6 +6632,8 @@ def main():
                 problems = write_bigpemu_config(cfg_path, pads, sdl)
             elif backend == "rmg":
                 problems = write_rmg_config(cfg_path, pads, app_id, exe)
+            elif backend == "m64py":
+                problems = write_m64py_config(cfg_path, pads, sdl)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:

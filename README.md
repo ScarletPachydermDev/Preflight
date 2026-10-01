@@ -40,6 +40,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | **shadPS4** | flatpak | face buttons per seat, by position; shadPS4 seats pads in the order SDL lists them, so the check screen shows that order |
 | **BigPEmu** | flatpak | both Jaguar ports (four with a Team Tap), by each pad's own id — A, B, C on the pad's A, B, X; Pause on Start, Option on Back |
 | **Rosalie's Mupen GUI** | flatpak | all four players' bindings, as N64 pads laid out like gopher64's, each port tied to its own controller |
+| **M64Py** | flatpak | all four players' bindings in mupen64plus's SDL input plugin, laid out like gopher64's |
 
 ## Requirements
 
