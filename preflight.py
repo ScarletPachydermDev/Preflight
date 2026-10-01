@@ -5995,7 +5995,7 @@ HANDHELD_OWNERS = os.path.join(STATE_DIR, "handheld.json")
 # VITA_VIEWBOX: 100, 60, 1110 x 525), with its size in the same units.
 VITA_VIEWBOX = (100.0, 60.0, 1110.0, 525.0)
 VITA_ANCHORS = {
-    "dpad": (217, 244, 150), "stick_l": (247, 375, 78),
+    "dpad": (217, 244, 136), "stick_l": (247, 375, 78),
     "stick_r": (1058, 375, 78), "faces": (1091, 244, 0),
     "start": (1103, 469, 30), "select": (1046, 469, 30),
 }
