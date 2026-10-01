@@ -35,7 +35,7 @@ import os
 import shutil
 import sys
 
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageDraw, ImageChops, ImageFilter
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SWITCH_DIR = os.path.join(HERE, "art")
@@ -637,6 +637,83 @@ def ps(pack):
     return count
 
 
+# The Dreamcast set: its own top row only — the rest of the map is the Xbox
+# one, since a Dreamcast pad's letters sit where an Xbox pad's do. The
+# triggers are Switch SL's outline turned anticlockwise into an upright
+# trigger, its "SL" taken out and the pack's own L or R put inside; R is the
+# mirror of L. Start is a downward triangle, the pad's own shape, drawn at
+# the weight of the other outlines.
+DC_DIR = os.path.join(SWITCH_DIR, "dc")
+DC_SWITCH = os.path.join("Nintendo Switch", "Double")
+DC_STROKE = 9
+
+
+def _dc_ring(im):
+    """The outline's largest piece alone, its lettering dropped."""
+    alpha = im.getchannel("A")
+    mask = Image.new("L", im.size, 0)
+    for x, y in components(alpha)[0]:
+        mask.putpixel((x, y), 255)
+    out = im.copy()
+    out.putalpha(ImageChops.multiply(alpha, mask.filter(ImageFilter.MaxFilter(3))))
+    return out
+
+
+def _dc_trigger(pack, letter_src, mirror):
+    def load_sw(name):
+        return Image.open(os.path.join(pack, DC_SWITCH, name + ".png")).convert("RGBA")
+    ring = _dc_ring(white(load_sw("switch_button_sl_outline"))).rotate(90, expand=True)
+    if mirror:
+        ring = ring.transpose(Image.FLIP_LEFT_RIGHT)
+    _shape, letter = split_letter(white(load_sw(letter_src)))
+    if letter is None:
+        sys.exit(f"{letter_src}: expected a letter inside the outline")
+    letter = letter.crop(letter.getchannel("A").getbbox())
+    bb = ring.getchannel("A").getbbox()
+    placed = Image.new("RGBA", ring.size, (255, 255, 255, 0))
+    placed.paste(letter, ((bb[0] + bb[2]) // 2 - letter.width // 2,
+                          (bb[1] + bb[3]) // 2 - letter.height // 2))
+    outline = ring.copy()
+    outline.alpha_composite(placed)
+    # The press is the filled shape with the letter as a hole, as the
+    # GameCube's are: the outline's white letter shows through it.
+    solid = fill_holes(ring)
+    on = solid.copy()
+    on.putalpha(ImageChops.subtract(
+        solid.getchannel("A"), placed.getchannel("A").filter(ImageFilter.MaxFilter(3))))
+    return outline, on
+
+
+def _dc_start(filled, side=128, scale=4):
+    w = 84
+    h = int(w * 0.866)
+    x0, y0 = (side - w) // 2, (side - h) // 2
+    pts = [(x * scale, y * scale) for x, y in
+           ((x0, y0), (x0 + w, y0), (side // 2, y0 + h))]
+    big = Image.new("L", (side * scale, side * scale), 0)
+    draw = ImageDraw.Draw(big)
+    if filled:
+        draw.polygon(pts, fill=255)
+    # The line goes on both, so the filled one has the outline's round
+    # corners too.
+    draw.line(pts + pts[:2], fill=255, width=DC_STROKE * scale, joint="curve")
+    out = Image.new("RGBA", (side, side), (255, 255, 255, 0))
+    out.putalpha(big.resize((side, side), Image.LANCZOS))
+    return out
+
+
+def dreamcast(pack):
+    os.makedirs(DC_DIR, exist_ok=True)
+    for key, src, mirror in (("l", "switch_button_l_outline", False),
+                             ("r", "switch_button_r_outline", True)):
+        outline, on = _dc_trigger(pack, src, mirror)
+        outline.save(os.path.join(DC_DIR, key + ".png"))
+        on.save(os.path.join(DC_DIR, key + "_on.png"))
+    _dc_start(False).save(os.path.join(DC_DIR, "start.png"))
+    _dc_start(True).save(os.path.join(DC_DIR, "start_on.png"))
+    return 6
+
+
 def xbox(pack):
     """The Xbox set, from the pack — ps() in another family."""
     os.makedirs(XBOX_DIR, exist_ok=True)
@@ -676,7 +753,7 @@ def main():
     licence = os.path.join(pack, "License.txt")
     if not os.path.isdir(os.path.join(pack, GC_PACK)):
         sys.exit(f"no {GC_PACK} in {pack}")
-    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack)
+    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack) + dreamcast(pack)
     derived = switch_faces()
     if os.path.isfile(licence):
         shutil.copyfile(licence, os.path.join(SWITCH_DIR, "LICENSE-kenney.txt"))

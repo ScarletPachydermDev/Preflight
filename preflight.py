@@ -4297,11 +4297,13 @@ def draw_gamepad(ui, bx, by, bw, bh, col, held, axes, bg, swap=False,
         dw, dh = bh * aspect, bh
     g = Bay(ui, bx + (bw - dw) / 2, by + (bh - dh) / 2, dw, dh, col, bg, dim,
             art={"gamecube": "gc/", "n64": "n64/",
-                 "playstation": "ps/", "xbox": "xbox/"}.get(layout, ""))
+                 "playstation": "ps/", "xbox": "xbox/",
+                 "dreamcast": "xbox/"}.get(layout, ""))
     controls = {"gamecube": _gamecube_controls,
                 "n64": _n64_controls,
                 "playstation": _playstation_controls,
-                "xbox": _xbox_controls}.get(
+                "xbox": _xbox_controls,
+                "dreamcast": _dreamcast_controls}.get(
                     layout, _switch_controls)
     if controls is _n64_controls:
         controls(g, held, axes, swap, holds or {}, wys, src, raw)
@@ -4533,6 +4535,45 @@ def _xbox_controls(g, held, axes, swap, holds, wys):
               axes, ax, ay, name, on(btn))
 
 
+DC = "../dc/"
+
+
+def _dreamcast_controls(g, held, axes, swap, holds, wys):
+    """A Dreamcast pad: the Xbox map below, its own top row above.
+
+    The letters sit where an Xbox pad's do, so only the top row is the
+    pad's own: two ANALOG triggers, filling as they are squeezed like the
+    GameCube's, and one Start — a downward triangle, as on the pad — which
+    starts alone and quits with a trigger, as on the N64 and GameCube maps.
+    """
+    S = g.S
+    on = held.__contains__
+    lay = Layout(g)
+
+    draw_top_row(g, lay, (
+        # The map's art is the Xbox set; these three are the Dreamcast's own.
+        Control(-lay.TRIGGER, DC + "l", S(0.31), axis=4, analog=True),
+        Control(lay.TRIGGER, DC + "r", S(0.31), axis=5, analog=True),
+        Control(0.0, DC + "start", S(0.21), (BTN_START,)),
+    ), holds, held, axes)
+    if holds.get(BTN_BACK, 0.0) > 0:
+        hold_ring(g.ui, lay.across(0.0), lay.top_y, S(0.21) * 0.643,
+                  holds[BTN_BACK], FG, g.track)
+
+    dpad_arms(g, lay.centres[0], lay.row_y, lay.dside, held)
+
+    live = face_live(held, swap)
+    for letter, name, dx, dy in XBOX_FACES:
+        g.face(name, lay.centres[3] + dx * lay.fspread,
+               lay.row_y + dy * lay.fspread, lay.fside,
+               pressed=letter in live, wys=wys)
+
+    for lane, btn, ax, ay, name in ((1, BTN_LSTICK, 0, 1, "stick_l"),
+                                    (2, BTN_RSTICK, 2, 3, "stick_r")):
+        stick(g, lay.centres[lane], lay.row_y, lay.sside, lay.stravel,
+              axes, ax, ay, name, on(btn))
+
+
 # The GameCube face cluster: an offset from A and a size, both in units of
 # the shared face box. That is all a map needs to own now — the rows, the
 # lanes and everything else come from Layout — and expressing the size as a
@@ -4567,7 +4608,9 @@ SELF_COLOURED = {"gc/stick_r"} | {
 # How much of its canvas a glyph's ink takes up, for the few places that
 # measure against ink rather than the box it is drawn in. Keyed the way the
 # art is: no prefix for the Switch set, "gc/" for the GameCube one.
-INK = {"gc/l": (0.750, 0.688), "gc/r": (0.750, 0.688)}
+INK = {"gc/l": (0.750, 0.688), "gc/r": (0.750, 0.688),
+       # Measured off art/dc when stage-art.py drew them.
+       "xbox/../dc/l": (0.500, 0.750), "xbox/../dc/r": (0.500, 0.750)}
 
 
 def gc_cluster(lay, faces=None):
@@ -4993,6 +5036,8 @@ GLYPH_ART = {
     # The Xbox set.
     "xb:lt": ("xbox/lt", 1.0), "xb:rt": ("xbox/rt", 1.0),
     "xb:view": ("xbox/view", 1.0), "xb:menu": ("xbox/menu", 1.0),
+    # The Dreamcast set.
+    "dc:l": ("dc/l", 1.0), "dc:start": ("dc/start", 1.0),
 }
 
 
@@ -5192,7 +5237,8 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
             swap_y = cy + int(ch * 0.13) + bh / 2 + ch * 0.04 + ch * 0.075
         # The swap badge means nothing on a map with no swap gesture: what
         # it would show there is the hardware, not a setting.
-        if pad and pad.swap_faces and layout not in ("playstation", "n64"):
+        if pad and pad.swap_faces and layout not in ("playstation", "n64",
+                                                     "dreamcast"):
             # Badged in the corner rather than on the pad itself — there is no
             # room among the buttons, and a non-default mapping deserves to be
             # visible from across the room.
@@ -5265,6 +5311,14 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
         if layout == "gamecube":
             items.insert(2, (["gc:l", "sep+", "gc:r"], None, anyone,
                              "swap ABXY"))
+    elif layout == "dreamcast":
+        # Start alone starts; a trigger with it quits, as on the GameCube and
+        # N64 maps — the pad has no second button for it either.
+        items = [
+            (["dc:start"], "P1", p1c, "hold to start"),
+            claim,
+            (["dc:l", "sep+", "dc:start"], "P1", p1c, "hold to quit"),
+        ]
     elif layout == "xbox":
         items = [
             (["xb:menu"], "P1", p1c, "hold to start"),
@@ -5318,7 +5372,7 @@ VIRTUAL_PAD_HINT = "SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=1"
 BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "gopher64": "n64", "duckstation": "playstation",
                   "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox",
-                  "flycast": "xbox"}
+                  "flycast": "dreamcast"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -5745,12 +5799,15 @@ def main():
             # a paired pad's real vendor id now says which way its letters
             # run, so there is nothing left for a person to correct. The
             # gesture lived here briefly while identity was still a guess.
-            if (layout_for(backend) not in ("playstation", "n64")
+            # Nor on the Dreamcast map: Flycast remaps by device name, and
+            # every Steam virtual pad has the same one, so a swap there
+            # could not be written.
+            if (layout_for(backend) not in ("playstation", "n64", "dreamcast")
                     and update_trigger_swap(pads, armed)):
                 remember(pads, known)
             # Both of these pads quit through Z+Start: neither has a
             # second button to spare for it.
-            if layout_for(backend) in ("gamecube", "n64"):
+            if layout_for(backend) in ("gamecube", "n64", "dreamcast"):
                 update_gc_holds(pads, holding, now)
 
             holds = {}
