@@ -4539,7 +4539,7 @@ DC = "../dc/"
 # The Dreamcast top row has three controls where the others have six, so
 # they are drawn bigger and drawn in towards Start rather than out at the
 # trigger places the other maps use.
-DC_TRIGGER_AT = 0.46
+DC_TRIGGER_AT = 0.56
 DC_TRIGGER_BOX = 0.42
 DC_START_BOX = 0.30
 
