@@ -148,27 +148,38 @@ def positional_swap(pad):
     it. An 8bitdo carried an accidental "no mirror" from the xemu screen into
     PCSX2 and every shape landed inverted. Cross is the bottom button; which
     SDL button that is depends on the pad, never on a choice.
+
+    And it is a mirror only when SDL's letters are LABELS: behind Steam
+    Input a Nintendo-lettered pad's A arrives as SDL's A although it sits
+    east, so Cross has to come from SDL's B. With Steam Input off SDL maps
+    the same pad by position and Cross is SDL's A already (steam_relabelled).
     """
-    return nintendo_layout(pad)
+    return steam_relabelled(pad)
 
 
 def default_swap(pad):
     """The swap setting that makes this pad truthful with nobody touching it.
 
     Every controller should be WYSIWYG out of the box, whichever layout it
-    has; L+R is there for someone who would rather have position accuracy.
+    has — by NAME: the button printed A is A. Whether that takes a mirror
+    depends on how SDL's letters arrive. Behind Steam Input a Nintendo-
+    lettered pad is relabelled, its printed A already arriving as SDL's A,
+    so the plain mapping is the truthful one; mirroring it, as this did,
+    turned an 8bitdo's A into B on every letter map. Only a Nintendo pad
+    that SDL maps by POSITION — Steam Input off — needs the mirror.
     """
-    return nintendo_layout(pad)
+    return nintendo_layout(pad) and not steam_relabelled(pad)
 
 
 def pad_wysiwyg(pad):
     """True when the button printed A really acts as A on this pad.
 
-    Identity mapping is truthful on an Xbox-layout pad; the mirrored one is
-    truthful on a Nintendo-layout pad. So the two agree exactly when the
-    swap setting matches the layout.
+    True exactly when the swap setting is the one that makes the pad
+    truthful by name, which is default_swap: an 8bitdo behind Steam Input
+    read amber while its letters were right, because this assumed SDL's
+    letters were always positions.
     """
-    return bool(pad.swap_faces) == nintendo_layout(pad)
+    return bool(pad.swap_faces) == default_swap(pad)
 
 # Nothing the user owns lives beside the code. SelfSteam embeds this project
 # and replaces the whole directory when it updates, so the install folder has
