@@ -5985,9 +5985,9 @@ def glyph_bar(ui, items, hidden=()):
 # A handheld game has one player, so its screen is one big picture of the
 # console rather than four bays: the device drawn whole (art/<layout>/body.png,
 # from stage-art.py) with the ordinary glyphs over its buttons, lit by the pad
-# that controls it. Which pad that is, any player decides with L3+R3 — "claim
-# handheld", always on offer, never spent — and the choice is remembered by
-# the pad's hardware id for the next session (handheld_owner).
+# that controls it. The pad that played last takes it again next time
+# (handheld_owner, saved by hardware id when the game starts); L3+R3 —
+# "claim handheld", always on offer, never spent — hands it to another.
 HANDHELD_LAYOUTS = {"vita"}
 HANDHELD_OWNERS = os.path.join(STATE_DIR, "handheld.json")
 
@@ -6970,6 +6970,12 @@ def main():
                 result, state = ["Config for this emulator was not found."], "error"
                 continue
             remember(pads, known)
+            # A handheld remembers whoever played last, claimed or not:
+            # L3+R3 is only for handing it to someone else.
+            if layout_for(backend) in HANDHELD_LAYOUTS:
+                last = next((p for p in pads if p.slot == 1), None)
+                if last is not None:
+                    save_handheld_owner(layout_for(backend), last)
             log_pads(pads, "writing")
             log_layouts(pads)
             if backend == "eden":
