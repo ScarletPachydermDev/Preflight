@@ -4536,6 +4536,12 @@ def _xbox_controls(g, held, axes, swap, holds, wys):
 
 
 DC = "../dc/"
+# The Dreamcast top row has three controls where the others have six, so
+# they are drawn bigger and drawn in towards Start rather than out at the
+# trigger places the other maps use.
+DC_TRIGGER_AT = 0.46
+DC_TRIGGER_BOX = 0.42
+DC_START_BOX = 0.30
 
 
 def _dreamcast_controls(g, held, axes, swap, holds, wys):
@@ -4552,12 +4558,14 @@ def _dreamcast_controls(g, held, axes, swap, holds, wys):
 
     draw_top_row(g, lay, (
         # The map's art is the Xbox set; these three are the Dreamcast's own.
-        Control(-lay.TRIGGER, DC + "l", S(0.31), axis=4, analog=True),
-        Control(lay.TRIGGER, DC + "r", S(0.31), axis=5, analog=True),
-        Control(0.0, DC + "start", S(0.21), (BTN_START,)),
+        Control(-DC_TRIGGER_AT, DC + "l", S(DC_TRIGGER_BOX), axis=4,
+                analog=True),
+        Control(DC_TRIGGER_AT, DC + "r", S(DC_TRIGGER_BOX), axis=5,
+                analog=True),
+        Control(0.0, DC + "start", S(DC_START_BOX), (BTN_START,)),
     ), holds, held, axes)
     if holds.get(BTN_BACK, 0.0) > 0:
-        hold_ring(g.ui, lay.across(0.0), lay.top_y, S(0.21) * 0.643,
+        hold_ring(g.ui, lay.across(0.0), lay.top_y, S(DC_START_BOX) * 0.643,
                   holds[BTN_BACK], FG, g.track)
 
     dpad_arms(g, lay.centres[0], lay.row_y, lay.dside, held)

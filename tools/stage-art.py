@@ -687,7 +687,10 @@ def _dc_trigger(pack, letter_src, mirror):
 def _dc_start(filled, side=128, scale=4):
     w = 84
     h = int(w * 0.866)
-    x0, y0 = (side - w) // 2, (side - h) // 2
+    # Centred on the triangle's own centre, a third of the way down from its
+    # top edge, not on its box: the hold ring is drawn round the middle of
+    # the canvas, and on the box's centre it sat visibly low on the shape.
+    x0, y0 = (side - w) // 2, side // 2 - h // 3
     pts = [(x * scale, y * scale) for x, y in
            ((x0, y0), (x0 + w, y0), (side // 2, y0 + h))]
     big = Image.new("L", (side * scale, side * scale), 0)
