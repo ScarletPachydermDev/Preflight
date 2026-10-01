@@ -746,6 +746,19 @@ inside its sandbox loads it, so names come from `sandbox_sdl3_devices` at
 write time. SDL defaults are positional; `positional_swap` mirrors a seat.
 PS Button is Guide alone — the combo string format was not confirmed.
 
+**Vita3K and the handheld screen, as of 2026-10-01.** Handhelds get one big
+console instead of four bays (`HANDHELD_LAYOUTS`, `draw_handheld`): the Vita
+outline drawn on the design canvas, rendered by stage-art.py into a body
+layer plus lit layers for its shoulders, Select, Start and PS button, with
+the PlayStation glyphs over its d-pad, faces (PS2/PS3 size and spacing) and
+sticks. L3+R3 is "claim handheld": never spent, and the claimer is
+remembered by hardware key in `handheld.json` (taken back on pairing).
+Vita3K reads EVERY controller as port 1 outside PS TV mode, so only the
+claimer's buttons are set: `controller-binds` (15) and
+`controller-axis-binds` (6) in config.yml — both always, since either one
+missing or the wrong length makes Vita3K reset both — written before YAML's
+trailing `...`. The user only cares that the claimed controller works.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No

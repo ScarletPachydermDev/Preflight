@@ -1419,6 +1419,7 @@ BACKENDS = {
     "rmg": ("rosalie241.rmg", "rmg"),
     "m64py": ("m64py",),
     "rpcs3": ("rpcs3",),
+    "vita3k": ("vita3k",),
 }
 
 
@@ -2558,6 +2559,84 @@ def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
     stamp = time.strftime("%Y%m%d-%H%M%S")
     shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"PCSX2.{stamp}.ini"))
     write_ini(cfg_path, out)
+    return []
+
+
+# ----------------------------------------------------------------- vita3k
+
+# Read out of Vita3K's source (vita3k/ctrl/src/ctrl.cpp, vita3k/main.cpp,
+# vita3k/config/include/config/config.h):
+#
+# * Outside PS TV mode EVERY controller is read as port 1 — the handheld's
+#   single player is all of them at once — so there is no seating to write,
+#   and no way to keep the others out (every Steam virtual pad is 28de:11ff
+#   to SDL). "Claim handheld" picks whose buttons the binding is right for.
+# * controller-binds: 15 shorts, indexed by SDL gamepad button, each the SDL
+#   button it acts as; controller-axis-binds: 6. Either list empty or the
+#   wrong length and Vita3K resets BOTH to identity (main.cpp), which is
+#   positional — Cross on South. So both are written: identity, or the
+#   PlayStation mirror for a claimer whose positional_swap says so.
+VITA3K_BUTTONS = 15
+VITA3K_AXES = 6
+
+
+def find_vita3k_config(app_id=None, exe=None):
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        if os.path.isfile(os.path.join(base, "config.yml")):
+            return os.path.join(base, "config.yml")
+        return os.path.expanduser("~/.config/Vita3K/config.yml")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or 'org.vita3k.Vita3K'}/config/Vita3K/config.yml")
+
+
+def _yaml_drop_key(lines, key):
+    """Lines without `key:` and any block sequence/mapping beneath it."""
+    out, skip = [], False
+    for line in lines:
+        if skip and (line.startswith((" ", "-", "\t")) and line.strip()):
+            continue
+        skip = False
+        if (line.split(":", 1)[0].strip() == key and ":" in line
+                and not line.startswith(" ")):
+            skip = True
+            continue
+        out.append(line)
+    return out
+
+
+def write_vita3k_config(cfg_path, pads):
+    pad = next((p for p in pads if p.slot == 1), None)
+    if pad is None:
+        return ["no controller to set up"]
+    if not os.path.isfile(cfg_path):
+        return ["Vita3K's config.yml was not found — run Vita3K once first."]
+    binds = list(range(VITA3K_BUTTONS))
+    mirror = positional_swap(pad)
+    if mirror:
+        binds[0], binds[1] = binds[1], binds[0]
+        binds[2], binds[3] = binds[3], binds[2]
+    with open(cfg_path) as fh:
+        lines = fh.read().splitlines()
+    lines = _yaml_drop_key(_yaml_drop_key(lines, "controller-binds"),
+                           "controller-axis-binds")
+    ours = [f"controller-binds: [{', '.join(map(str, binds))}]",
+            f"controller-axis-binds: [{', '.join(map(str, range(VITA3K_AXES)))}]"]
+    # Vita3K ends the file with YAML's "..." end-of-document marker; anything
+    # after it is not part of the document, so ours go in before it.
+    end = next((i for i in range(len(lines) - 1, -1, -1)
+                if lines[i].strip() == "..."), len(lines))
+    lines[end:end] = ours
+    print(f"vita3k: the handheld is {pad.label}"
+          f"{' (faces mirrored)' if mirror else ''}; every pad drives port 1",
+          flush=True)
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"vita3k.{stamp}.yml"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os.replace(tmp, cfg_path)
     return []
 
 
@@ -6206,7 +6285,7 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox",
                   "flycast": "dreamcast", "shadps4": "playstation",
                   "bigpemu": "xbox", "rmg": "n64", "m64py": "n64",
-                  "rpcs3": "playstation"}
+                  "rpcs3": "playstation", "vita3k": "vita"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -6380,6 +6459,7 @@ BACKEND_ENV = {
     "m64py": (VIRTUAL_PAD_HINT,),
     # RPCS3 bundles SDL 3.4.14: the same hiding.
     "rpcs3": (VIRTUAL_PAD_HINT,),
+    "vita3k": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -6511,6 +6591,8 @@ def main():
         cfg_path = find_m64py_config(app_id, exe)
     elif backend == "rpcs3":
         cfg_path = find_rpcs3_config(app_id, exe)
+    elif backend == "vita3k":
+        cfg_path = find_vita3k_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -6918,6 +7000,8 @@ def main():
                 problems = write_m64py_config(cfg_path, pads, sdl)
             elif backend == "rpcs3":
                 problems = write_rpcs3_config(cfg_path, pads, app_id, exe)
+            elif backend == "vita3k":
+                problems = write_vita3k_config(cfg_path, pads)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:

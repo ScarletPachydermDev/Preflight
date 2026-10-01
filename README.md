@@ -42,6 +42,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | **Rosalie's Mupen GUI** | flatpak | all four players' bindings, as N64 pads laid out like gopher64's, each port tied to its own controller |
 | **M64Py** | flatpak | all four players' bindings in mupen64plus's SDL input plugin, laid out like gopher64's |
 | **RPCS3** | flatpak | all seven players' bindings through its SDL handler, by position like every PlayStation emulator |
+| **Vita3K** | AppImage | a Vita handheld screen; L3+R3 claims the handheld (remembered), and its buttons are set right for that controller |
 
 ## Requirements
 
