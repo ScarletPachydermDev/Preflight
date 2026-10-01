@@ -721,7 +721,11 @@ layout kept as `BIGPEMU_PAD_TEMPLATE`.
 gamepad name, path and serial ALL match; read through RMG's own SDL (KDE
 runtime 3.2.30) by running `flatpak run --command=python3` at write time —
 every Steam virtual pad is "Steam Virtual Gamepad" there, told apart by its
-/dev/input path. RMG's default is unplugged with nothing mapped, so the
+/dev/input path — but only OUTSIDE a game: inside a Steam launch the same
+SDL names them by the real controller ("Steam Controller", "8BitDo SN30
+Pro"), measured 2026-10-01. RMG wants an exact name, so the list must be
+read at write time, in the launch's own environment; never precompute it.
+RMG's default is unplugged with nothing mapped, so the
 whole N64 layout is written (gopher64's), as `;`-separated type/data/extra
 lists; a native N64 pad gets its own C buttons and Z.
 
