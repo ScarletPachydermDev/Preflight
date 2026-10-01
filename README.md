@@ -39,6 +39,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | **Flycast** | flatpak | all four players' Dreamcast ports — and plugs a controller into each one used, since Flycast ships with only port A |
 | **shadPS4** | flatpak | face buttons per seat, by position; shadPS4 seats pads in the order SDL lists them, so the check screen shows that order |
 | **BigPEmu** | flatpak | both Jaguar ports (four with a Team Tap), by each pad's own id — A, B, C on the pad's A, B, X; Pause on Start, Option on Back |
+| **Rosalie's Mupen GUI** | flatpak | all four players' bindings, as N64 pads laid out like gopher64's, each port tied to its own controller |
 
 ## Requirements
 

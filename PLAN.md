@@ -715,6 +715,16 @@ port 1 was bound, to one Steam slot. User's choices: A/B/C on the pad's
 A/B/X by letter, Pause on Start, Option on Back; the rest of BigPEmu's own
 layout kept as `BIGPEMU_PAD_TEMPLATE`.
 
+**Rosalie's Mupen GUI, as of 2026-10-01.** From v0.9.0's source. One
+`Input Plugin Profile N` section per port in mupen64plus.cfg
+(`$XDG_CONFIG_HOME/RMG`). DeviceType 4 ties a port to the device whose SDL
+gamepad name, path and serial ALL match; read through RMG's own SDL (KDE
+runtime 3.2.30) by running `flatpak run --command=python3` at write time —
+every Steam virtual pad is "Steam Virtual Gamepad" there, told apart by its
+/dev/input path. RMG's default is unplugged with nothing mapped, so the
+whole N64 layout is written (gopher64's), as `;`-separated type/data/extra
+lists; a native N64 pad gets its own C buttons and Z.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No

@@ -1416,6 +1416,7 @@ BACKENDS = {
     "flycast": ("flycast",),
     "shadps4": ("shadps4",),
     "bigpemu": ("bigpemu",),
+    "rmg": ("rosalie241.rmg", "rmg"),
 }
 
 
@@ -2555,6 +2556,202 @@ def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
     stamp = time.strftime("%Y%m%d-%H%M%S")
     shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"PCSX2.{stamp}.ini"))
     write_ini(cfg_path, out)
+    return []
+
+
+# -------------------------------------------------------------------- rmg
+
+# Rosalie's Mupen GUI, read out of v0.9.0's source (Source/RMG-Input/main.cpp,
+# common.hpp, UserInterface/Widget/ControllerWidget.cpp, RMG-Core/Settings.cpp
+# and Directories.cpp).
+#
+# * mupen64plus.cfg under $XDG_CONFIG_HOME/RMG — for the flatpak,
+#   ~/.var/app/com.github.Rosalie241.RMG/config/RMG/. One section per port,
+#   "Rosalie's Mupen GUI - Input Plugin Profile N".
+# * DeviceType 4 (Joystick) ties a port to the device whose SDL gamepad
+#   name, path and serial ALL equal DeviceName/DevicePath/DeviceSerial
+#   (open_controller). Read through RMG's own SDL — the KDE runtime's SDL
+#   3.2.30 — from INSIDE its sandbox: there every Steam virtual pad is
+#   "Steam Virtual Gamepad", its path its /dev/input node, its serial empty.
+# * RMG's own default is unplugged with nothing mapped (SaveDefaultSettings),
+#   so every control is written. A mapping is three ;-separated lists: type
+#   (0 gamepad button, 1 gamepad axis), data (SDL3 button or axis), extra
+#   (for an axis, 1 positive, 0 negative).
+#
+# The layout is gopher64's, so an N64 game feels the same in either: A and
+# B on the pad's A and B, Z on the right trigger, L and R the shoulders, C on
+# the right stick — and a real N64 pad on its own C buttons and Z.
+RMG_APP_ID = "com.github.Rosalie241.RMG"
+RMG_SECTION = "Rosalie's Mupen GUI - Input Plugin Profile {}"
+_GB, _GA = 0, 1
+RMG_MAP = {
+    "A": [(_GB, 0, 0)], "B": [(_GB, 1, 0)], "Start": [(_GB, 6, 0)],
+    "DpadUp": [(_GB, 11, 0)], "DpadDown": [(_GB, 12, 0)],
+    "DpadLeft": [(_GB, 13, 0)], "DpadRight": [(_GB, 14, 0)],
+    "CButtonUp": [(_GA, 3, 0)], "CButtonDown": [(_GA, 3, 1)],
+    "CButtonLeft": [(_GA, 2, 0)], "CButtonRight": [(_GA, 2, 1)],
+    "LeftTrigger": [(_GB, 9, 0)], "RightTrigger": [(_GB, 10, 0)],
+    "ZTrigger": [(_GA, 5, 1)],
+    "AnalogStickUp": [(_GA, 1, 0)], "AnalogStickDown": [(_GA, 1, 1)],
+    "AnalogStickLeft": [(_GA, 0, 0)], "AnalogStickRight": [(_GA, 0, 1)],
+}
+# A real N64 pad through SDL 3.2's mapping, which is SDL2's (see
+# N64_C_NATIVE): C up North, C left West, C right Back, C down the right
+# trigger, Z the left trigger.
+RMG_MAP_NATIVE_N64 = dict(RMG_MAP,
+    CButtonUp=[(_GB, 3, 0)], CButtonLeft=[(_GB, 2, 0)],
+    CButtonRight=[(_GB, 4, 0)], CButtonDown=[(_GA, 5, 1)],
+    ZTrigger=[(_GA, 4, 1)])
+
+RMG_ENUM = r"""
+import ctypes
+sdl = ctypes.CDLL("libSDL3.so.0")
+sdl.SDL_Init.argtypes = [ctypes.c_uint32]; sdl.SDL_Init.restype = ctypes.c_bool
+sdl.SDL_Init(0x200 | 0x2000)
+class G(ctypes.Structure):
+    _fields_ = [("d", ctypes.c_uint8 * 16)]
+c = ctypes.c_int(0)
+sdl.SDL_GetJoysticks.restype = ctypes.POINTER(ctypes.c_uint32)
+ids = sdl.SDL_GetJoysticks(ctypes.byref(c))
+sdl.SDL_OpenGamepad.restype = ctypes.c_void_p
+sdl.SDL_OpenGamepad.argtypes = [ctypes.c_uint32]
+for f in ("SDL_GetGamepadName", "SDL_GetGamepadPath", "SDL_GetGamepadSerial"):
+    getattr(sdl, f).restype = ctypes.c_char_p
+    getattr(sdl, f).argtypes = [ctypes.c_void_p]
+sdl.SDL_GetJoystickGUIDForID.restype = G
+sdl.SDL_GetJoystickGUIDForID.argtypes = [ctypes.c_uint32]
+sdl.SDL_GUIDToString.argtypes = [G, ctypes.c_char_p, ctypes.c_int]
+sdl.SDL_IsGamepad.restype = ctypes.c_bool
+sdl.SDL_IsGamepad.argtypes = [ctypes.c_uint32]
+for i in range(c.value):
+    if not sdl.SDL_IsGamepad(ids[i]):
+        continue
+    g = ctypes.c_void_p(sdl.SDL_OpenGamepad(ids[i]))
+    b = ctypes.create_string_buffer(33)
+    sdl.SDL_GUIDToString(sdl.SDL_GetJoystickGUIDForID(ids[i]), b, 33)
+    f = lambda v: (v or b"").decode(errors="replace")
+    print(b.value.decode(), f(sdl.SDL_GetGamepadName(g)),
+          f(sdl.SDL_GetGamepadPath(g)), f(sdl.SDL_GetGamepadSerial(g)), sep="\t")
+"""
+
+
+def find_rmg_config(app_id=None, exe=None):
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        if os.path.isfile(os.path.join(base, "portable.txt")):
+            return os.path.join(base, "Config", "mupen64plus.cfg")
+        return os.path.expanduser("~/.config/RMG/mupen64plus.cfg")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or RMG_APP_ID}/config/RMG/mupen64plus.cfg")
+
+
+def rmg_devices(app_id=None):
+    """{guid: [(name, path, serial)]} as RMG's own SDL sees them."""
+    cmd = ["flatpak", "run", "--command=python3",
+           f"--env={VIRTUAL_PAD_HINT}", app_id or RMG_APP_ID, "-c", RMG_ENUM]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    found = {}
+    for line in out.stdout.splitlines():
+        bits = line.split("\t")
+        if len(bits) == 4:
+            found.setdefault(bits[0], []).append(tuple(bits[1:]))
+    return found if out.returncode == 0 else None
+
+
+def _rmg_quote(v):
+    if isinstance(v, bool):
+        return "True" if v else "False"
+    if isinstance(v, int):
+        return str(v)
+    return '"' + str(v).replace('"', "") + '"'
+
+
+def write_rmg_config(cfg_path, pads, app_id=None, exe=None):
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)[:4]
+    if not assigned:
+        return ["no controllers assigned"]
+    devices = rmg_devices(app_id) if not exe else None
+    if devices is None and not exe:
+        print("rmg: could not list devices through RMG's SDL; using ours",
+              flush=True)
+
+    sections = {}
+    used = set()
+    for n in range(4):
+        pad = next((p for p in assigned if p.slot == n + 1), None)
+        rows = []
+        if pad is None:
+            rows = [("PluggedIn", False), ("DeviceType", 0),
+                    ("DeviceName", "None"), ("DevicePath", ""),
+                    ("DeviceSerial", "")]
+        else:
+            cands = [d for d in (devices or {}).get(pad.sdl_guid, [])
+                     if d not in used]
+            if cands:
+                name, path, serial = cands[0]
+                used.add(cands[0])
+            else:
+                virtual = (pad.vendor, pad.product) == STEAM_VIRTUAL
+                name = "Steam Virtual Gamepad" if virtual else (pad.gc_name or pad.name)
+                path, serial = pad.devpath or "", ""
+            table = RMG_MAP_NATIVE_N64 if native_n64(pad) else RMG_MAP
+            if pad.swap_faces and not native_n64(pad):
+                table = dict(table, A=table["B"], B=table["A"])
+            rows = [("PluggedIn", True), ("DeviceType", 4),
+                    ("DeviceName", name), ("DevicePath", path),
+                    ("DeviceSerial", serial), ("Deadzone", 9),
+                    ("Sensitivity", 100), ("Pak", 0),
+                    ("RemoveDuplicateMappings", True),
+                    ("FilterEventsForButtons", True),
+                    ("FilterEventsForAxis", True)]
+            for key, triggers in table.items():
+                rows += [(f"{key}_InputType", ";".join(str(t[0]) for t in triggers)),
+                         (f"{key}_Name", ";".join("" for _ in triggers)),
+                         (f"{key}_Data", ";".join(str(t[1]) for t in triggers)),
+                         (f"{key}_ExtraData", ";".join(str(t[2]) for t in triggers))]
+            print(f"rmg: P{pad.slot} {pad.label} -> port {n + 1} = "
+                  f"'{name}' {path}", flush=True)
+        sections[RMG_SECTION.format(n)] = rows
+
+    # mupen64plus.cfg: [Section] blocks of "Key = value". Ours replace only
+    # the keys we set; everything else in those sections, and every other
+    # section, is kept.
+    text = open(cfg_path).read() if os.path.isfile(cfg_path) else ""
+    blocks, order = {}, []
+    cur = None
+    for line in text.splitlines():
+        st = line.strip()
+        if st.startswith("[") and st.endswith("]"):
+            cur = st[1:-1]
+            order.append(cur)
+            blocks[cur] = []
+        elif cur is not None:
+            blocks[cur].append(line)
+        else:
+            blocks.setdefault(None, []).append(line)
+    for name, rows in sections.items():
+        if name not in blocks:
+            order.append(name)
+            blocks[name] = []
+        keys = {k for k, _ in rows}
+        kept = [l for l in blocks[name]
+                if l.split("=", 1)[0].strip() not in keys and l.strip()]
+        blocks[name] = kept + [f"{k} = {_rmg_quote(v)}" for k, v in rows]
+    out = list(blocks.get(None, []))
+    for name in order:
+        out += [f"[{name}]", ""] + blocks[name] + [""]
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    if os.path.isfile(cfg_path):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"mupen64plus.{stamp}.cfg"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(out).rstrip("\n") + "\n")
+    os.replace(tmp, cfg_path)
     return []
 
 
@@ -5648,7 +5845,7 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "gopher64": "n64", "duckstation": "playstation",
                   "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox",
                   "flycast": "dreamcast", "shadps4": "playstation",
-                  "bigpemu": "xbox"}
+                  "bigpemu": "xbox", "rmg": "n64"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -5816,6 +6013,8 @@ BACKEND_ENV = {
     "shadps4": (VIRTUAL_PAD_HINT,),
     # BigPEmu's flatpak runs the runtime's sdl2-compat: the same hiding.
     "bigpemu": (VIRTUAL_PAD_HINT,),
+    # RMG's flatpak runs the KDE runtime's SDL 3.2: the same hiding.
+    "rmg": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -5941,6 +6140,8 @@ def main():
         cfg_path = find_shadps4_config(app_id, exe)
     elif backend == "bigpemu":
         cfg_path = find_bigpemu_config(app_id, exe)
+    elif backend == "rmg":
+        cfg_path = find_rmg_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -6310,6 +6511,8 @@ def main():
                 problems = write_shadps4_config(cfg_path, pads)
             elif backend == "bigpemu":
                 problems = write_bigpemu_config(cfg_path, pads, sdl)
+            elif backend == "rmg":
+                problems = write_rmg_config(cfg_path, pads, app_id, exe)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:
