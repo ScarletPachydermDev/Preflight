@@ -3,6 +3,7 @@
 
     steam-shortcut.py <shortcuts.vdf>                       # list every entry
     steam-shortcut.py <shortcuts.vdf> "<name>" "<prefix>"   # prefix its LaunchOptions
+    steam-shortcut.py <shortcuts.vdf> "=<name>" "<prefix>"  # ... matching the whole name
 
 The name is matched as a substring: these titles carry trademark signs and
 em-dashes that do not survive being typed through a shell.
@@ -102,10 +103,16 @@ def main():
         return 0
 
     want, prefix = sys.argv[2].encode(), sys.argv[3].encode()
+    # "=Name" matches the whole name: a short title like "Super" is also a
+    # substring of "Clash of Super Heroes".
+    exact = want.startswith(b"=")
+    if exact:
+        want = want[1:]
     hits = 0
     for _t, _idx, app in m:
         d = {k: v for _tt, k, v in app}
-        if want not in d.get(b"AppName", d.get(b"appname", b"")):
+        name = d.get(b"AppName", d.get(b"appname", b""))
+        if (name != want) if exact else (want not in name):
             continue
         for n, (ti, k, v) in enumerate(app):
             if k == b"LaunchOptions":
