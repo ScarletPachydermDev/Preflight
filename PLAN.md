@@ -737,7 +737,7 @@ has SDL 2.32.10 and lists pads in the same order with the same GUIDs as
 ours, so the index is taken at write time like Flycast's. Raw numbers come
 from each pad's own SDL mapping. `_write_mupen_cfg` is shared with RMG.
 
-**RPCS3, as of 2026-10-01 (written, not yet tested in a game).** From
+**RPCS3, as of 2026-10-01 (verified in ICO).** From
 RPCS3's source. `input_configs/global/Default.yml` (a per-title one wins);
 with none, player 1 is the keyboard and no pad works. Each "Player N Input"
 gets Handler SDL and Device "<SDL gamepad name> <n>", n counting that name
