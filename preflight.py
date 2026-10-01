@@ -1418,6 +1418,7 @@ BACKENDS = {
     "bigpemu": ("bigpemu",),
     "rmg": ("rosalie241.rmg", "rmg"),
     "m64py": ("m64py",),
+    "rpcs3": ("rpcs3",),
 }
 
 
@@ -2560,6 +2561,108 @@ def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
     return []
 
 
+# ------------------------------------------------------------------ rpcs3
+
+# Read out of RPCS3's source (rpcs3/Input/sdl_pad_handler.cpp,
+# rpcs3/Emu/Io/pad_config.{h,cpp}, rpcs3/Emu/system_utils.cpp):
+#
+# * input_configs/global/Default.yml under the config dir (a per-title
+#   input_configs/<TITLE>/Default.yml wins over it). With no file at all
+#   RPCS3 gives player 1 the KEYBOARD and nobody a pad — the state the
+#   machine was in, 2026-10-01.
+# * "Player N Input" (1-7): Handler, Device, Config, Buddy Device. The SDL
+#   handler names a pad "<SDL gamepad name> <n>", n counting pads of that
+#   name in SDL_GetGamepads order. RPCS3 bundles SDL 3.4.14 in /app/lib, and
+#   a python run inside its sandbox loads that same library, so the names
+#   are read there at write time (sandbox_sdl3_devices) — they differ inside
+#   a Steam launch, as RMG showed.
+# * SDL's own defaults are already positional (Cross South, Circle East,
+#   Square West, Triangle North); the PlayStation rule mirrors a seat only
+#   where positional_swap says so. Every key is written, since a config's
+#   defaults are empty until a handler fills them in.
+RPCS3_APP_ID = "net.rpcs3.RPCS3"
+RPCS3_CONFIG = {
+    "Left Stick Left": "LS X-", "Left Stick Down": "LS Y-",
+    "Left Stick Right": "LS X+", "Left Stick Up": "LS Y+",
+    "Right Stick Left": "RS X-", "Right Stick Down": "RS Y-",
+    "Right Stick Right": "RS X+", "Right Stick Up": "RS Y+",
+    "Start": "Start", "Select": "Back", "PS Button": "Guide",
+    "Square": "West", "Cross": "South", "Circle": "East", "Triangle": "North",
+    "Left": "Left", "Down": "Down", "Right": "Right", "Up": "Up",
+    "R1": "RB", "R2": "RT", "R3": "RS", "L1": "LB", "L2": "LT", "L3": "LS",
+}
+RPCS3_MIRROR = {"Cross": "East", "Circle": "South",
+                "Square": "North", "Triangle": "West"}
+
+
+def find_rpcs3_config(app_id=None, exe=None):
+    base = (os.path.expanduser("~/.config/rpcs3") if exe else
+            os.path.expanduser(f"~/.var/app/{app_id or RPCS3_APP_ID}/config/rpcs3"))
+    return os.path.join(base, "input_configs", "global", "Default.yml")
+
+
+def _yaml_str(v):
+    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def write_rpcs3_config(cfg_path, pads, app_id=None, exe=None):
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)[:7]
+    if not assigned:
+        return ["no controllers assigned"]
+    rows = sandbox_sdl3_devices(app_id or RPCS3_APP_ID, ordered=True) \
+        if not exe else None
+    if not rows:
+        return ["could not list the controllers the way RPCS3 will"]
+    # "<name> <n>", n counting that name in SDL's order — as enumerate_devices.
+    named, seen = [], {}
+    for guid, name, _path, _serial in rows:
+        seen[name] = seen.get(name, 0) + 1
+        named.append((guid, f"{name} {seen[name]}"))
+
+    used, problems, lines = set(), [], []
+    for n in range(1, 8):
+        pad = next((p for p in assigned if p.slot == n), None)
+        lines.append(f"Player {n} Input:")
+        if pad is None:
+            lines += ['  Handler: "Null"', '  Device: "Null"',
+                      '  Buddy Device: "Null"']
+            continue
+        device = next((d for g, d in named
+                       if g == pad.sdl_guid and d not in used), None)
+        if device is None:
+            problems.append(f"{pad.label}: not among the devices RPCS3 will open")
+            continue
+        used.add(device)
+        cfg = dict(RPCS3_CONFIG)
+        if positional_swap(pad):
+            cfg.update(RPCS3_MIRROR)
+        lines += ["  Handler: SDL", f"  Device: {_yaml_str(device)}", "  Config:"]
+        lines += [f"    {k}: {_yaml_str(v)}" for k, v in cfg.items()]
+        lines.append('  Buddy Device: ""')
+        print(f"rpcs3: P{n} {pad.label} -> Player {n} = '{device}'"
+              f"{' (faces mirrored)' if positional_swap(pad) else ''}", flush=True)
+    if problems:
+        return problems
+
+    root = os.path.dirname(os.path.dirname(cfg_path))
+    if os.path.isdir(root):
+        own = [d for d in os.listdir(root)
+               if d != "global" and os.path.isfile(os.path.join(root, d, "Default.yml"))]
+        if own:
+            print(f"rpcs3: note: per-game input configs exist and win over "
+                  f"this one for their games: {', '.join(sorted(own))}", flush=True)
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    if os.path.isfile(cfg_path):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"rpcs3-Default.{stamp}.yml"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os.replace(tmp, cfg_path)
+    return []
+
+
 # -------------------------------------------------------------------- rmg
 
 # Rosalie's Mupen GUI, read out of v0.9.0's source (Source/RMG-Input/main.cpp,
@@ -2648,18 +2751,30 @@ def find_rmg_config(app_id=None, exe=None):
 
 def rmg_devices(app_id=None):
     """{guid: [(name, path, serial)]} as RMG's own SDL sees them."""
+    return sandbox_sdl3_devices(app_id or RMG_APP_ID)
+
+
+def sandbox_sdl3_devices(app_id, ordered=False):
+    """The pads as the SDL3 inside this flatpak sees them, listed from
+    inside its sandbox in the launch's own environment: {guid: [(name,
+    path, serial)]}, or with ordered=True [(guid, name, path, serial)] in
+    SDL_GetGamepads order."""
     cmd = ["flatpak", "run", "--command=python3",
-           f"--env={VIRTUAL_PAD_HINT}", app_id or RMG_APP_ID, "-c", RMG_ENUM]
+           f"--env={VIRTUAL_PAD_HINT}", app_id, "-c", RMG_ENUM]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except (subprocess.SubprocessError, OSError):
         return None
+    if out.returncode != 0:
+        return None
+    rows = [tuple(line.split("\t")) for line in out.stdout.splitlines()
+            if line.count("\t") == 3]
+    if ordered:
+        return rows
     found = {}
-    for line in out.stdout.splitlines():
-        bits = line.split("\t")
-        if len(bits) == 4:
-            found.setdefault(bits[0], []).append(tuple(bits[1:]))
-    return found if out.returncode == 0 else None
+    for guid, *rest in rows:
+        found.setdefault(guid, []).append(tuple(rest))
+    return found
 
 
 def _rmg_quote(v):
@@ -5960,7 +6075,8 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "gopher64": "n64", "duckstation": "playstation",
                   "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox",
                   "flycast": "dreamcast", "shadps4": "playstation",
-                  "bigpemu": "xbox", "rmg": "n64", "m64py": "n64"}
+                  "bigpemu": "xbox", "rmg": "n64", "m64py": "n64",
+                  "rpcs3": "playstation"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -6132,6 +6248,8 @@ BACKEND_ENV = {
     "rmg": (VIRTUAL_PAD_HINT,),
     # M64Py's flatpak has SDL 2.32.10: the same hiding.
     "m64py": (VIRTUAL_PAD_HINT,),
+    # RPCS3 bundles SDL 3.4.14: the same hiding.
+    "rpcs3": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -6261,6 +6379,8 @@ def main():
         cfg_path = find_rmg_config(app_id, exe)
     elif backend == "m64py":
         cfg_path = find_m64py_config(app_id, exe)
+    elif backend == "rpcs3":
+        cfg_path = find_rpcs3_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -6634,6 +6754,8 @@ def main():
                 problems = write_rmg_config(cfg_path, pads, app_id, exe)
             elif backend == "m64py":
                 problems = write_m64py_config(cfg_path, pads, sdl)
+            elif backend == "rpcs3":
+                problems = write_rpcs3_config(cfg_path, pads, app_id, exe)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:

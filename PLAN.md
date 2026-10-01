@@ -737,6 +737,15 @@ has SDL 2.32.10 and lists pads in the same order with the same GUIDs as
 ours, so the index is taken at write time like Flycast's. Raw numbers come
 from each pad's own SDL mapping. `_write_mupen_cfg` is shared with RMG.
 
+**RPCS3, as of 2026-10-01 (written, not yet tested in a game).** From
+RPCS3's source. `input_configs/global/Default.yml` (a per-title one wins);
+with none, player 1 is the keyboard and no pad works. Each "Player N Input"
+gets Handler SDL and Device "<SDL gamepad name> <n>", n counting that name
+in SDL_GetGamepads order. RPCS3 bundles SDL 3.4.14 in /app/lib and a python
+inside its sandbox loads it, so names come from `sandbox_sdl3_devices` at
+write time. SDL defaults are positional; `positional_swap` mirrors a seat.
+PS Button is Guide alone — the combo string format was not confirmed.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No

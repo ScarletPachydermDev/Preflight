@@ -41,6 +41,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | **BigPEmu** | flatpak | both Jaguar ports (four with a Team Tap), by each pad's own id — A, B, C on the pad's A, B, X; Pause on Start, Option on Back |
 | **Rosalie's Mupen GUI** | flatpak | all four players' bindings, as N64 pads laid out like gopher64's, each port tied to its own controller |
 | **M64Py** | flatpak | all four players' bindings in mupen64plus's SDL input plugin, laid out like gopher64's |
+| **RPCS3** | flatpak | all seven players' bindings through its SDL handler, by position like every PlayStation emulator |
 
 ## Requirements
 
