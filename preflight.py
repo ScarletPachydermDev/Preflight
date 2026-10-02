@@ -6290,7 +6290,13 @@ def glyph_bar(ui, items, hidden=(), rings=None):
             first = item[0][0]
             gw0 = _item_glyph_widths(ui, item[0], size)[first]
             radius = gw0 / 2 + spacing * 0.30
-            hold_ring(ui, x + gw0 / 2, y_mid, radius, frac, colour,
+            centre = x + gw0 / 2
+            if first.startswith("dot:"):
+                # Round the button, not the name printed beside it.
+                pill_h = _pill_h
+                radius = pill_h * 0.275 + spacing * 0.9
+                centre = x + pill_h * 0.275
+            hold_ring(ui, centre, y_mid, radius, frac, colour,
                       blend(BG, FG, 0.18))
 
 
