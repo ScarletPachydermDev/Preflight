@@ -3008,7 +3008,7 @@ def write_play_config(cfg_path, pads):
 #   the index and the raw numbers are read inside its sandbox, at write time
 #   in the launch's environment (MELONDS_ENUM), never assumed from ours.
 # * Two screen hotkeys exist, each one button: swap the screens, and swap
-#   which one is big. The DS has no use for ZL/ZR, so they get them.
+#   which one is big. They sit on L3/R3, as Azahar's do.
 MELONDS_APP_ID = "net.kuribo64.melonDS"
 MELONDS_ENUM = r"""
 import ctypes
@@ -3038,8 +3038,10 @@ MELONDS_MIRROR = {"A": "b", "B": "a", "X": "y", "Y": "x"}
 # The stick half each d-pad direction also answers to.
 MELONDS_STICK = {"Up": ("lefty", "-"), "Down": ("lefty", "+"),
                  "Left": ("leftx", "-"), "Right": ("leftx", "+")}
-MELONDS_HOTKEYS = {"HK_SwapScreens": "righttrigger",
-                   "HK_SwapScreenEmphasis": "lefttrigger"}
+# On the stick clicks, as on Azahar: L3 swaps the screens, R3 swaps which
+# one is big (melonDS has no hotkey that cycles its layouts).
+MELONDS_HOTKEYS = {"HK_SwapScreens": "leftstick",
+                   "HK_SwapScreenEmphasis": "rightstick"}
 
 
 def find_melonds_config(app_id=None, exe=None):
@@ -7112,7 +7114,7 @@ def read_axes(sdl, pads, logged):
 
 def update_shoulder_swap(pads, armed):
     """update_trigger_swap with L+R: the DS map's swap, since a DS has no
-    triggers and ZL/ZR are melonDS's screen buttons in game."""
+    triggers."""
     changed = False
     for pad in pads:
         key = (pad.key, "shoulder-swap")
