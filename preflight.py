@@ -34,6 +34,8 @@ import collections
 import copy
 import ctypes
 import ctypes.util
+import fcntl
+import glob
 import select
 import struct
 import json
@@ -1422,6 +1424,7 @@ BACKENDS = {
     "vita3k": ("vita3k",),
     "ppsspp": ("ppsspp",),
     "melonds": ("melonds",),
+    "play": ("purei",),
 }
 
 
@@ -2643,6 +2646,235 @@ def write_ppsspp_config(cfg_path, pads):
         stamp = time.strftime("%Y%m%d-%H%M%S")
         shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"ppsspp-controls.{stamp}.ini"))
     write_ini(cfg_path, out)
+    return []
+
+
+# ------------------------------------------------------------------- play
+
+# Play! (PS2), read out of its 0.74 source (Source/input/InputBindingManager,
+# Source/ui_qt/unix/{InputProviderEvDev,GamePadUtils}.cpp, Framework's
+# CConfig). Unlike every other emulator here it reads controllers through
+# EVDEV, below SDL and Steam Input:
+#
+# * A binding names a device by a six-number id: the evdev "uniq" as a MAC
+#   when it is one, else its first six characters, else vendor, product and
+#   version as little-endian bytes. Every Steam virtual pad is 28de:11ff v1
+#   with no uniq, so they all share one id and Play! cannot tell them apart.
+#   A pad with real hardware behind it is therefore bound to that hardware
+#   by its MAC (preflight's pairing already found it); only a pad with none,
+#   a Steam Controller, is bound to the virtual id, and only one such pad
+#   can be seated without the others driving it too.
+# * Codes are the kernel's, which are POSITIONS (BTN_SOUTH is the bottom
+#   button) — what a PlayStation map wants, whatever is printed on the pad.
+# * An absolute axis whose `flat` is 0 is treated as a hat: -1/0/+1 become
+#   4/8/0, and anything else passes through raw under the hat type. So the
+#   d-pad hat is a POVHAT binding per direction, and an analog trigger with
+#   flat 0 is a SIMPLE binding of hat type (raw 0-255, pressed above 0).
+# * The profile is "Play Data Files/inputprofiles/default.xml" under
+#   $XDG_CONFIG_HOME: pad1..pad4, each PS2 button's bindingtype (0 none,
+#   1 simple, 3 hat) and bindingtarget1 {providerId 'evdv', deviceId,
+#   keyId, keyType 0 button / 1 axis / 2 hat}.
+PLAY_APP_ID = "org.purei.Play"
+PLAY_PROVIDER = 0x65766476            # 'evdv'
+PLAY_BUTTONS = ("analog_left_x", "analog_left_y", "analog_right_x",
+                "analog_right_y", "dpad_up", "dpad_down", "dpad_left",
+                "dpad_right", "select", "start", "square", "triangle",
+                "circle", "cross", "l1", "l2", "l3", "r1", "r2", "r3")
+PLAY_KEYS = {"cross": 304, "circle": 305, "triangle": 307, "square": 308,
+             "l1": 310, "r1": 311, "select": 314, "start": 315,
+             "l3": 317, "r3": 318}
+PLAY_DPAD = {"dpad_up": (544, 17, 4), "dpad_down": (545, 17, 0),
+             "dpad_left": (546, 16, 4), "dpad_right": (547, 16, 0)}
+PLAY_TRIGGERS = {"l2": (312, 2), "r2": (313, 5)}
+PLAY_STICKS = {"analog_left_x": 0, "analog_left_y": 1,
+               "analog_right_x": 3, "analog_right_y": 4}
+
+
+def find_play_config(app_id=None, exe=None):
+    base = (os.environ.get("XDG_CONFIG_HOME") or "~/.local/share") if exe \
+        else f"~/.var/app/{app_id or PLAY_APP_ID}/config"
+    return os.path.expanduser(
+        os.path.join(base, "Play Data Files", "inputprofiles", "default.xml"))
+
+
+def _sysfs_bits(path):
+    """The set bits of a sysfs capability bitmap."""
+    words = (sysfs_read(path) or "").split()[::-1]
+    bits = set()
+    for i, w in enumerate(words):
+        try:
+            v = int(w, 16)
+        except ValueError:
+            continue
+        for b in range(64):
+            if v >> b & 1:
+                bits.add(i * 64 + b)
+    return bits
+
+
+def _abs_flat(node, axis):
+    """EVIOCGABS's `flat` for this axis, or None."""
+    try:
+        fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        raw = fcntl.ioctl(fd, 0x80184540 + axis, bytes(24))
+        return struct.unpack("6i", raw)[4]
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def play_devices():
+    """Every evdev gamepad node: [{node, vendor, product, version, uniq,
+    keys, abs}] — the virtual ones too, since Play! reads those as well."""
+    out = []
+    for base in sorted(glob.glob("/sys/class/input/event*")):
+        dev = f"{base}/device"
+        keys = _sysfs_bits(f"{dev}/capabilities/key")
+        if 304 not in keys:
+            continue
+        try:
+            ids = [int(sysfs_read(f"{dev}/id/{k}") or "0", 16)
+                   for k in ("vendor", "product", "version")]
+        except ValueError:
+            continue
+        out.append({"node": "/dev/input/" + os.path.basename(base),
+                    "vendor": ids[0], "product": ids[1], "version": ids[2],
+                    "uniq": sysfs_read(f"{dev}/uniq") or "",
+                    "keys": keys, "abs": _sysfs_bits(f"{dev}/capabilities/abs")})
+    return out
+
+
+def play_device_id(dev):
+    """Play!'s six-number id for an evdev device, as its config writes it."""
+    uniq = dev["uniq"]
+    nums = None
+    if uniq:
+        parts = uniq.split(":")
+        if len(parts) == 6:
+            try:
+                nums = [int(p, 16) for p in parts]
+            except ValueError:
+                nums = None
+        if nums is None and len(uniq) >= 6:
+            nums = [ord(c) for c in uniq[:6]]
+    if not nums or not any(nums):
+        v, p, r = dev["vendor"], dev["product"], dev["version"]
+        nums = [v & 0xFF, v >> 8 & 0xFF, p & 0xFF, p >> 8 & 0xFF,
+                r & 0xFF, r >> 8 & 0xFF]
+    return ":".join(f"{n:x}" for n in nums)
+
+
+def _play_device_for(pad, devices):
+    """The evdev device Play! should read for this pad: its own hardware,
+    matched by MAC (or vendor and product when it has none), else Steam's
+    virtual pad."""
+    real = pad.real
+    if real:
+        mac = (real.get("mac") or "").lower()
+        for d in devices:
+            if (d["vendor"], d["product"]) != (real.get("vendor"),
+                                               real.get("product")):
+                continue
+            if mac and d["uniq"].lower() != mac:
+                continue
+            return d, False
+    for d in devices:
+        if (d["vendor"], d["product"]) == STEAM_VIRTUAL:
+            return d, True
+    return None, False
+
+
+def write_play_config(cfg_path, pads):
+    assigned = sorted((p for p in pads if p.slot), key=lambda p: p.slot)[:2]
+    if not assigned:
+        return ["no controllers assigned"]
+    devices = play_devices()
+    prefs = []
+
+    def pref(name, kind, value):
+        prefs.append((name, kind, value))
+
+    def target(base, dev_id, key, key_type):
+        pref(f"{base}.bindingtarget1.providerId", "integer", PLAY_PROVIDER)
+        pref(f"{base}.bindingtarget1.deviceId", "string", dev_id)
+        pref(f"{base}.bindingtarget1.keyId", "integer", key)
+        pref(f"{base}.bindingtarget1.keyType", "integer", key_type)
+
+    virtual_used = False
+    for n in range(1, 5):
+        pad = next((p for p in assigned if p.slot == n), None)
+        dev, virtual = _play_device_for(pad, devices) if pad else (None, False)
+        if pad and virtual and virtual_used:
+            print(f"play: P{n} {pad.label} has no hardware of its own and "
+                  f"another pad already uses Steam's virtual one; left unbound",
+                  flush=True)
+            dev = None
+        if pad and dev is None and not virtual:
+            print(f"play: P{n} {pad.label}: no evdev device found", flush=True)
+        virtual_used = virtual_used or bool(dev and virtual)
+        pref(f"input.pad{n}.analog.sensitivity", "float", "1.000000")
+        for button in PLAY_BUTTONS:
+            base = f"input.pad{n}.{button}"
+            if dev is None:
+                pref(f"{base}.bindingtype", "integer", 0)
+                continue
+            dev_id = play_device_id(dev)
+            node, keys, axes = dev["node"], dev["keys"], dev["abs"]
+            if button in PLAY_KEYS and PLAY_KEYS[button] in keys:
+                pref(f"{base}.bindingtype", "integer", 1)
+                target(base, dev_id, PLAY_KEYS[button], 0)
+            elif button in PLAY_DPAD:
+                btn, hat, ref = PLAY_DPAD[button]
+                if btn in keys:
+                    pref(f"{base}.bindingtype", "integer", 1)
+                    target(base, dev_id, btn, 0)
+                elif hat in axes:
+                    pref(f"{base}.bindingtype", "integer", 3)
+                    target(base, dev_id, hat, 2)
+                    pref(f"{base}.povhatbinding.refvalue", "integer", ref)
+                else:
+                    pref(f"{base}.bindingtype", "integer", 0)
+            elif button in PLAY_TRIGGERS:
+                btn, axis = PLAY_TRIGGERS[button]
+                if btn in keys:
+                    pref(f"{base}.bindingtype", "integer", 1)
+                    target(base, dev_id, btn, 0)
+                elif axis in axes:
+                    pref(f"{base}.bindingtype", "integer", 1)
+                    target(base, dev_id, axis,
+                           2 if _abs_flat(node, axis) == 0 else 1)
+                else:
+                    pref(f"{base}.bindingtype", "integer", 0)
+            elif button in PLAY_STICKS and PLAY_STICKS[button] in axes:
+                pref(f"{base}.bindingtype", "integer", 1)
+                target(base, dev_id, PLAY_STICKS[button], 1)
+            else:
+                pref(f"{base}.bindingtype", "integer", 0)
+        if pad and dev is not None:
+            print(f"play: P{n} {pad.label} -> pad{n} = "
+                  f"{'Steam virtual pad' if virtual else dev['node']} "
+                  f"({play_device_id(dev)})", flush=True)
+    if not any(p for p in prefs if p[0].endswith("bindingtype") and p[2]):
+        return ["no controller Play! can read was found"]
+
+    from xml.sax.saxutils import quoteattr
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<Config>"]
+    lines += [f"\t<Preference Name={quoteattr(name)} Type=\"{kind}\" "
+              f"Value={quoteattr(str(value))} />" for name, kind, value in prefs]
+    lines.append("</Config>")
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    if os.path.isfile(cfg_path):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"play-default.{stamp}.xml"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os.replace(tmp, cfg_path)
     return []
 
 
@@ -6677,7 +6909,8 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "flycast": "dreamcast", "shadps4": "playstation",
                   "bigpemu": "xbox", "rmg": "n64", "m64py": "n64",
                   "rpcs3": "playstation", "vita3k": "vita",
-                  "ppsspp": "psp", "melonds": "ds"}
+                  "ppsspp": "psp", "melonds": "ds",
+                  "play": "playstation"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -7009,6 +7242,8 @@ def main():
         cfg_path = find_ppsspp_config(app_id, exe)
     elif backend == "melonds":
         cfg_path = find_melonds_config(app_id, exe)
+    elif backend == "play":
+        cfg_path = find_play_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -7432,6 +7667,8 @@ def main():
                 problems = write_ppsspp_config(cfg_path, pads)
             elif backend == "melonds":
                 problems = write_melonds_config(cfg_path, pads, app_id, exe)
+            elif backend == "play":
+                problems = write_play_config(cfg_path, pads)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:
