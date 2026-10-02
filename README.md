@@ -24,26 +24,34 @@ players wait while you work out whose controller is which and inputs work. Just 
 
 ## Supported emulators
 
-| Emulator | Builds | What Preflight writes |
-|:---|:---|:---|
-| **Ryubing (Ryujinx)** | flatpak, AppImage, tar | all four players' bindings, as Pro Controllers |
-| **Dolphin** | flatpak | GameCube controller only |
-| **Wheel Wizard** | Flatpak, native Linux build | writes Dolphin's GameCube pads before Wheel Wizard launches it |
-| **Eden** | flatpak, AppImage | all four players' bindings, as Pro Controllers — needs Steam Input **on** |
-| **Cemu** | flatpak | all four players: P1 a Wii U GamePad or Pro Controller (**+** and **−** on the check screen, remembered per game), the rest Pro Controllers |
-| **gopher64** | flatpak | all four players' bindings, as N64 pads — and enables ports 2-4, which gopher64 ships disabled |
-| **DuckStation** | AppImage | all four players' bindings, as DualShocks with rumble — and turns the multitap on for three or more — needs Steam Input **on** |
-| **xemu** | flatpak | all four players' bindings, as Xbox controllers, by each pad's own id |
-| **PCSX2** | flatpak | all four players' bindings, as DualShock 2s with rumble — and turns the multitap on for three or more |
-| **Xenia Canary** | AppImage | no player settings exist in Xenia, so the check screen shows the seating Xenia itself will use (Steam's controller order); writes a mirrored button mapping for pads that need one |
-| **Flycast** | flatpak | all four players' Dreamcast ports — and plugs a controller into each one used, since Flycast ships with only port A |
-| **shadPS4** | flatpak | face buttons per seat, by position; shadPS4 seats pads in the order SDL lists them, so the check screen shows that order |
-| **BigPEmu** | flatpak | both Jaguar ports (four with a Team Tap), by each pad's own id — A, B, C on the pad's A, B, X; Pause on Start, Option on Back |
-| **Rosalie's Mupen GUI** | flatpak | all four players' bindings, as N64 pads laid out like gopher64's, each port tied to its own controller |
-| **M64Py** | flatpak | all four players' bindings in mupen64plus's SDL input plugin, laid out like gopher64's |
-| **RPCS3** | flatpak | all seven players' bindings through its SDL handler, by position like every PlayStation emulator |
-| **Vita3K** | AppImage | a Vita handheld screen; L3+R3 claims the handheld (remembered), and its buttons are set right for that controller |
-| **PPSSPP** | flatpak | a PSP handheld screen; binds the claimed controller under PPSSPP's own number for it, faces by position, and puts L/R where SDL sends them |
+| Emulator | Package | Players | Notes |
+|:---|:---|:---|:---|
+| **Ryubing (Ryujinx)** | `io.github.ryubing.Ryujinx`, AppImage | 4 | Pro Controllers |
+| **Eden** | `dev.eden_emu.eden`, AppImage | 4 | Pro Controllers. **Steam Input on only** |
+| **Dolphin** | `org.DolphinEmu.dolphin-emu` | 4 | GameCube pads only; Wii remotes untouched. Steam Controller can't be bound |
+| **Wheel Wizard** | `io.github.TeamWheelWizard.WheelWizard` | 4 | writes Dolphin's GameCube pads |
+| **Cemu** | `info.cemu.Cemu` | 4 | P1 GamePad or Pro Controller (**+**/**−**, remembered per game) |
+| **gopher64** | `io.github.gopher64.gopher64` | 4 | enables ports 2-4 |
+| **Rosalie's Mupen GUI** | `com.github.Rosalie241.RMG` | 4 | Rumble Pak on |
+| **M64Py** | `net.sourceforge.m64py.M64Py` | 4 | Rumble Pak on |
+| **DuckStation** | AppImage | 4 | multitap for 3+. **Steam Input on only** |
+| **PCSX2** | `net.pcsx2.PCSX2` | 4 | multitap for 3+ |
+| **Play!** | `org.purei.Play` | 2 | reads controllers below Steam; only one Steam Controller can be seated |
+| **RPCS3** | `net.rpcs3.RPCS3` | 7 | |
+| **shadPS4** | `net.shadps4.shadPS4` | 4 | **no claim P1**: seats pads in SDL's order |
+| **xemu** | `app.xemu.xemu` | 4 | |
+| **Xenia Canary** | AppImage | 4 | **no claim P1**: seats pads in Steam's order |
+| **Flycast** | `org.flycast.Flycast` | 4 | plugs a controller into each port used |
+| **BigPEmu** | `com.richwhitehouse.BigPEmu` | 2 (4 Team Tap) | Pause on Start, Option on Back |
+| **Vita3K** | AppImage | handheld | L3+R3 claims the handheld |
+| **PPSSPP** | `org.ppsspp.PPSSPP` | handheld | L3+R3 claims the handheld |
+| **melonDS** | `net.kuribo64.melonDS` | handheld | L+R swaps ABXY; L3 swaps screens |
+| **Azahar** | `org.azahar_emu.Azahar` | handheld | L+R swaps ABXY; L3 swaps screens, R3 cycles layouts |
+
+- PlayStation emulators bind by position: Cross is the bottom button on any pad.
+- Handhelds remember the last controller played, except a Steam Controller
+  (it has no hardware id).
+- All verified with Steam Input **on**. Steam Input off is untested on most.
 
 ## Requirements
 
