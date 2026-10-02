@@ -6128,6 +6128,10 @@ def _glyph_metrics(ui, size):
     pill_h = int(th * 1.45)
 
     def glyph_w(g):
+        if g.startswith("dot:"):
+            return pill_h * 0.55 + pill_h * 0.22 + ui.text_size(g[4:], size, True)[0]
+        if g.startswith("o:"):
+            return max(pill_h, ui.text_size(g[2:], size, True)[0] + pill_h * 0.45)
         if g.startswith("sep"):
             return ui.text_size(g[3:], size, True)[0] + pill_h * 0.20
         if g in GLYPH_ART:
@@ -6177,7 +6181,19 @@ def _draw_glyph_item(ui, item, x, y_mid, size, bold=False):
     for g in glyphs:
         gw = gws[g]
         shell = blend(BG, FG, 0.20)
-        if g.startswith("sep"):
+        if g.startswith("dot:"):
+            # The DS's own Start and Select: a small round button with its
+            # name printed beside it, as on the console.
+            r = pill_h * 0.275
+            ui.ring(x + r, y + pill_h / 2, r - max(2, pill_h * 0.07), r, FG)
+            _, gth = ui.text_size(g[4:], size, True)
+            ui.text(g[4:], x + 2 * r + pill_h * 0.22, y + (pill_h - gth) / 2,
+                    size, FG, bold=True)
+        elif g.startswith("o:"):
+            # A plain circle with the button's letter in it.
+            ui.fill_circle(x + gw / 2, y + pill_h / 2, gw / 2, shell)
+            ui.glyph_centered(g[2:], x + gw / 2, y + pill_h / 2, size, FG)
+        elif g.startswith("sep"):
             # A bare joiner, not a button: no pill, so "L3 + R3" reads as one
             # combo rather than three separate things to press.
             _, sth = ui.text_size(g[3:], size, True)
@@ -6452,14 +6468,20 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
 
     # "sep " is an empty joiner: room for the hold ring between the glyph
     # and its words, so the dots never sit on the text.
-    p = "ds:" if ds else "ps:"
+    start, select = (("dot:START", "dot:SELECT") if ds
+                     else ("ps:start", "ps:select"))
     items = [
-        ([p + "start", "sep "], "P1", player_color(1), "hold to start"),
+        ([start, "sep "], "P1", player_color(1), "hold to start"),
         (["L3", "sep+", "R3"], None, None, "claim handheld"),
-        ([p + "select", "sep "], None, FG, "hold to quit"),
+        ([select, "sep "], None, FG, "hold to quit"),
     ]
     if ds:
-        items.insert(2, (["ds:zl", "sep+", "ds:zr"], None, FG, "swap ABXY"))
+        items.insert(2, (["o:L", "sep+", "o:R"], None, FG, "swap ABXY"))
+        # A mapping that is not the truthful one is never invisible: the
+        # swap badge, top right of the console, as in the pad bays.
+        if pad and not pad_wysiwyg(pad):
+            side = ui.h * 0.075
+            swap_icon(ui, bx + bw - side * 0.5, by - side * 0.75, side, col)
     glyph_bar(ui, items, rings={0: (mine.get(BTN_START, 0.0), player_color(1)),
               len(items) - 1: (mine.get(BTN_BACK, 0.0), FG)})
 
@@ -6712,6 +6734,23 @@ def read_axes(sdl, pads, logged):
                 print(f"axis: P{pad.slot or '-'} axis={axis} "
                       f"({AXIS_NAMES.get(axis, '?')}) reached {value}",
                       flush=True)
+
+
+def update_shoulder_swap(pads, armed):
+    """update_trigger_swap with L+R: the DS map's swap, since a DS has no
+    triggers and ZL/ZR are melonDS's screen buttons in game."""
+    changed = False
+    for pad in pads:
+        key = (pad.key, "shoulder-swap")
+        if BTN_LSHOULDER in pad.held and BTN_RSHOULDER in pad.held:
+            if key not in armed:
+                armed.add(key)
+                pad.swap_faces = not pad.swap_faces
+                pad.swap_explicit = True
+                changed = True
+        else:
+            armed.discard(key)
+    return changed
 
 
 def update_trigger_swap(pads, armed):
@@ -7120,7 +7159,9 @@ def main():
             # Nor on the Vita or PSP: their shapes are positions too.
             if (layout_for(backend) not in ("playstation", "n64", "dreamcast",
                                             "vita", "psp")
-                    and update_trigger_swap(pads, armed)):
+                    and (update_shoulder_swap(pads, armed)
+                         if layout_for(backend) == "ds"
+                         else update_trigger_swap(pads, armed))):
                 remember(pads, known)
             # Both of these pads quit through Z+Start: neither has a
             # second button to spare for it.
