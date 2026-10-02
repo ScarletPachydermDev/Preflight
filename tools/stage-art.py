@@ -792,6 +792,71 @@ def psp():
     return 1 + 2 * len(PSP_LIT)
 
 
+# The DS Lite, open, hinge and lower half only — the half with the controls.
+# Drawn on the design canvas after the line art of a DS Lite (the console's
+# own proportions, nothing copied but where things sit). Its glyphs are
+# Kenney's Wii U set: the closest family to the DS's own round letters.
+DS_DIR = os.path.join(SWITCH_DIR, "ds")
+DS_PACK = os.path.join("Nintendo WiiU", "Double")
+DS_VIEWBOX = (600, 532, 800, 438)
+DS_BODY = """
+<g stroke-width="5">
+<path d="M645 540 L1357 540 Q1383 540 1383 566 Q1383 592 1357 592 L645 592 Q619 592 619 566 Q619 540 645 540 Z"/>
+<path d="M619 566 L619 951 Q618 963 630 963 L1371 963 Q1383 963 1383 951 L1383 566"/>
+</g>
+<g stroke-width="4">
+<path d="M712 540 L712 592 M1287 540 L1287 592"/>
+<path d="M801 592 L801 911 Q801 919 809 919 L1194 919 Q1202 919 1202 911 L1202 592"/>
+<rect x="822" y="629" width="360" height="269" rx="2"/>
+<rect x="997" y="554" width="9" height="19" rx="3" fill="#ffffff"/>
+<rect x="1328" y="552" width="11" height="30" rx="5.5"/>
+<rect x="1345" y="552" width="11" height="30" rx="5.5"/>
+</g>"""
+DS_PARTS = {
+    "start": "M1214 864 A8 8 0 1 0 1230 864 A8 8 0 1 0 1214 864 Z",
+    "select": "M1214 899 A8 8 0 1 0 1230 899 A8 8 0 1 0 1214 899 Z",
+}
+
+
+def ds(pack):
+    """The DS outline and lit parts (cairosvg, dev only), and its glyphs."""
+    import cairosvg
+    os.makedirs(DS_DIR, exist_ok=True)
+    x, y, w, h = DS_VIEWBOX
+    head = VITA_HEAD.format(vb=f"{x} {y} {w} {h}", w=w * 2, h=h * 2)
+
+    def render(body, name):
+        cairosvg.svg2png(bytestring=(head + body + "</svg>").encode(),
+                         write_to=os.path.join(DS_DIR, name + ".png"))
+    render(DS_BODY, "body")
+    for key, d in DS_PARTS.items():
+        render(f'<path stroke-width="4" d="{d}"/>', key)
+        render(f'<path stroke-width="4" fill="#ffffff" d="{d}"/>', key + "_on")
+    count = 1 + 2 * len(DS_PARTS)
+
+    def load_w(name):
+        return Image.open(os.path.join(pack, DS_PACK, name + ".png")).convert("RGBA")
+
+    for key in ("a", "b", "x", "y"):
+        src = "wiiu_button_" + key
+        ring, letter = split_letter(white(load_w(src + "_outline")))
+        if letter is None:
+            sys.exit(f"{src}: expected a letter inside the ring")
+        flat = ring.copy()
+        flat.alpha_composite(letter)
+        flat.save(os.path.join(DS_DIR, key + ".png"))
+        letter.save(os.path.join(DS_DIR, key + "_letter.png"))
+        press_from(white(load_w(src))).save(os.path.join(DS_DIR, key + "_press.png"))
+        count += 3
+    for key in ("l", "r"):
+        white(load_w(f"wiiu_button_{key}")).save(os.path.join(DS_DIR, key + "_on.png"))
+        count += 1
+    white(load_w("wiiu_dpad")).save(os.path.join(DS_DIR, "dpad.png"))
+    for key in PS_ARMS:
+        arm_only(load_w("wiiu_" + key)).save(os.path.join(DS_DIR, key + ".png"))
+    return count + 1 + len(PS_ARMS)
+
+
 def xbox(pack):
     """The Xbox set, from the pack — ps() in another family."""
     os.makedirs(XBOX_DIR, exist_ok=True)
@@ -831,7 +896,7 @@ def main():
     licence = os.path.join(pack, "License.txt")
     if not os.path.isdir(os.path.join(pack, GC_PACK)):
         sys.exit(f"no {GC_PACK} in {pack}")
-    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack) + dreamcast(pack) + vita() + psp()
+    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack) + dreamcast(pack) + vita() + psp() + ds(pack)
     derived = switch_faces()
     if os.path.isfile(licence):
         shutil.copyfile(licence, os.path.join(SWITCH_DIR, "LICENSE-kenney.txt"))

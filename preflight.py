@@ -1421,6 +1421,7 @@ BACKENDS = {
     "rpcs3": ("rpcs3",),
     "vita3k": ("vita3k",),
     "ppsspp": ("ppsspp",),
+    "melonds": ("melonds",),
 }
 
 
@@ -2642,6 +2643,205 @@ def write_ppsspp_config(cfg_path, pads):
         stamp = time.strftime("%Y%m%d-%H%M%S")
         shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"ppsspp-controls.{stamp}.ini"))
     write_ini(cfg_path, out)
+    return []
+
+
+# ---------------------------------------------------------------- melonds
+
+# Read out of melonDS 1.1's source (frontend/qt_sdl/Config.cpp,
+# EmuInstanceInput.cpp):
+#
+# * melonDS.toml in $XDG_CONFIG_HOME/melonDS. One pad is read, the SDL
+#   JOYSTICK INDEX in [Instance0] JoystickID, and every DS button in
+#   [Instance0.Joystick] is a raw number in one int: the low 16 bits a
+#   button (0xFFFF = none) or a hat (0x100 | hat << 4 | direction), and with
+#   0x10000 set an axis as well, (axis << 24) | (direction << 20) — 0
+#   positive, 1 negative, 2 a trigger. So a d-pad direction can carry the
+#   stick's half too: one int, both inputs.
+# * The flatpak runs the KDE runtime's sdl2-compat 2.32.70 on SDL 3.2, so
+#   the index and the raw numbers are read inside its sandbox, at write time
+#   in the launch's environment (MELONDS_ENUM), never assumed from ours.
+# * Two screen hotkeys exist, each one button: swap the screens, and swap
+#   which one is big. The DS has no use for ZL/ZR, so they get them.
+MELONDS_APP_ID = "net.kuribo64.melonDS"
+MELONDS_ENUM = r"""
+import ctypes
+sdl = ctypes.CDLL("libSDL2-2.0.so.0")
+sdl.SDL_Init(0x200 | 0x2000)
+class G(ctypes.Structure):
+    _fields_ = [("d", ctypes.c_uint8 * 16)]
+sdl.SDL_JoystickGetDeviceGUID.restype = G
+sdl.SDL_JoystickGetGUIDString.argtypes = [G, ctypes.c_char_p, ctypes.c_int]
+sdl.SDL_GameControllerMappingForDeviceIndex.restype = ctypes.c_void_p
+for i in range(sdl.SDL_NumJoysticks()):
+    b = ctypes.create_string_buffer(33)
+    sdl.SDL_JoystickGetGUIDString(sdl.SDL_JoystickGetDeviceGUID(i), b, 33)
+    m = sdl.SDL_GameControllerMappingForDeviceIndex(i)
+    print(i, b.value.decode(), ctypes.string_at(m).decode() if m else "",
+          sep="\t")
+"""
+# DS button -> SDL gamepad element, by position: A is east.
+MELONDS_MAP = {
+    "A": "b", "B": "a", "X": "y", "Y": "x",
+    "L": "leftshoulder", "R": "rightshoulder",
+    "Select": "back", "Start": "start",
+    "Up": "dpup", "Down": "dpdown", "Left": "dpleft", "Right": "dpright",
+}
+MELONDS_MIRROR = {"A": "a", "B": "b", "X": "x", "Y": "y"}
+# The stick half each d-pad direction also answers to.
+MELONDS_STICK = {"Up": ("lefty", "-"), "Down": ("lefty", "+"),
+                 "Left": ("leftx", "-"), "Right": ("leftx", "+")}
+MELONDS_HOTKEYS = {"HK_SwapScreens": "righttrigger",
+                   "HK_SwapScreenEmphasis": "lefttrigger"}
+
+
+def find_melonds_config(app_id=None, exe=None):
+    if exe:
+        return os.path.expanduser("~/.config/melonDS/melonDS.toml")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or MELONDS_APP_ID}/config/melonDS/melonDS.toml")
+
+
+def melonds_joysticks(app_id=None, exe=None):
+    """[(index, guid, mapping)] as melonDS's own SDL lists them."""
+    if exe:
+        cmd = [sys.executable, "-c", MELONDS_ENUM]
+    else:
+        cmd = ["flatpak", "run", "--command=python3",
+               f"--env={VIRTUAL_PAD_HINT}", app_id or MELONDS_APP_ID,
+               "-c", MELONDS_ENUM]
+    env = dict(os.environ, SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD="1")
+    try:
+        out = subprocess.run(cmd, env=env, capture_output=True, text=True,
+                             timeout=60)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    rows = []
+    for line in out.stdout.splitlines():
+        bits = line.split("\t")
+        if len(bits) == 3 and bits[0].isdigit():
+            rows.append((int(bits[0]), bits[1], bits[2]))
+    return rows
+
+
+def _melonds_bind(element, trigger=False, half=None):
+    """One SDL mapping element ("b3", "h0.4", "a5", "+a2", "a1~") as
+    melonDS's int, or None."""
+    el = element.lstrip("+-").rstrip("~")
+    if el.startswith("b") and el[1:].isdigit():
+        return int(el[1:])
+    if el.startswith("h") and "." in el:
+        hat, _, bit = el[1:].partition(".")
+        if hat.isdigit() and bit.isdigit():
+            return 0x100 | (int(hat) << 4) | int(bit)
+        return None
+    if el.startswith("a") and el[1:].isdigit():
+        if trigger:
+            direction = 2
+        else:
+            neg = (half == "-") != element.endswith("~")
+            direction = 1 if neg else 0
+        return 0x10000 | (int(el[1:]) << 24) | (direction << 20) | 0xFFFF
+    return None
+
+
+def write_melonds_config(cfg_path, pads, app_id=None, exe=None):
+    import tomllib
+
+    pad = next((p for p in pads if p.slot == 1), None)
+    if pad is None:
+        return ["no controller to set up"]
+    joys = melonds_joysticks(app_id, exe)
+    if not joys:
+        return ["could not list the controllers the way melonDS will"]
+    hit = next((j for j in joys if j[1] == pad.sdl_guid), None)
+    if hit is None or not hit[2]:
+        return [f"{pad.label}: not among the devices melonDS will open"]
+    index, _guid, mapping = hit
+    elements = {}
+    for field in mapping.split(",")[2:]:
+        key, sep, val = field.partition(":")
+        if sep:
+            elements[key] = val
+
+    table = dict(MELONDS_MAP)
+    mirror = positional_swap(pad)
+    if mirror:
+        table.update(MELONDS_MIRROR)
+    binds = {}
+    for button, el in table.items():
+        val = _melonds_bind(elements[el]) if el in elements else None
+        if button in MELONDS_STICK:
+            axis, half = MELONDS_STICK[button]
+            stick = (_melonds_bind(elements[axis], half=half)
+                     if axis in elements else None)
+            if stick is not None and stick & 0x10000:
+                low = 0xFFFF if val is None or val & 0x10000 else val
+                val = (stick & ~0xFFFF) | low
+        binds[button] = -1 if val is None else val
+    for hk, el in MELONDS_HOTKEYS.items():
+        val = (_melonds_bind(elements[el], trigger=el.endswith("trigger"))
+               if el in elements else None)
+        binds[hk] = -1 if val is None else val
+    print(f"melonds: the handheld is {pad.label} = SDL joystick {index}"
+          f"{' (faces mirrored)' if mirror else ''}", flush=True)
+
+    lines = []
+    if os.path.isfile(cfg_path):
+        try:
+            with open(cfg_path) as fh:
+                lines = fh.read().splitlines()
+        except OSError as err:
+            return [f"cannot read melonDS.toml: {err}"]
+    blocks = [[None, []]]
+    for line in lines:
+        if _toml_header(line) is not None:
+            blocks.append([line, []])
+        else:
+            blocks[-1][1].append(line)
+    joy_text = [f"{k} = {v}" for k, v in binds.items()]
+    out, have_inst, have_joy = [], False, False
+    for header, body in blocks:
+        name = _toml_header(header) if header else None
+        if name == "Instance0":
+            have_inst = True
+            body = _drop_toml_key(body, "JoystickID")
+            while body and not body[-1].strip():
+                body.pop()
+            out += [header] + body + [f"JoystickID = {index}", ""]
+            continue
+        if name == "Instance0.Joystick":
+            have_joy = True
+            for k in binds:
+                body = _drop_toml_key(body, k)
+            while body and not body[-1].strip():
+                body.pop()
+            out += [header] + body + joy_text + [""]
+            continue
+        if header:
+            out.append(header)
+        out += body
+    if not have_inst:
+        out += ["", "[Instance0]", f"JoystickID = {index}"]
+    if not have_joy:
+        out += ["", "[Instance0.Joystick]"] + joy_text
+    text = "\n".join(out).strip("\n") + "\n"
+    try:
+        tomllib.loads(text)
+    except ValueError as err:
+        return [f"would have written invalid melonDS.toml: {err}"]
+
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    if os.path.isfile(cfg_path):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"melonds.{stamp}.toml"))
+    tmp = cfg_path + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, cfg_path)
     return []
 
 
@@ -6082,7 +6282,7 @@ def glyph_bar(ui, items, hidden=(), rings=None):
 # that controls it. The pad that played last takes it again next time
 # (handheld_owner, saved by hardware id when the game starts); L3+R3 —
 # "claim handheld", always on offer, never spent — hands it to another.
-HANDHELD_LAYOUTS = {"vita", "psp"}
+HANDHELD_LAYOUTS = {"vita", "psp", "ds"}
 HANDHELD_OWNERS = os.path.join(STATE_DIR, "handheld.json")
 
 # Where each control sits, in the outline's own viewBox (stage-art.py's
@@ -6111,10 +6311,26 @@ PSP_ANCHORS = {
     "start": (1548, 796, 58), "select": (1421, 796, 58),
 }
 
+# The DS Lite: hinge and lower half (stage-art.py's DS_VIEWBOX), glyphs from
+# Kenney's Wii U set. Its faces are drawn at the canvas's own size and
+# spacing. L and R live on the back of the console, so they are not drawn at
+# rest: each shows inside the hinge, over its own side, only while held.
+DS_VIEWBOX = (600.0, 532.0, 800.0, 438.0)
+DS_ANCHORS = {
+    "dpad": (707, 733, 140), "faces": (1294.5, 736, 0),
+    "face_size": (64, 44.5), "l": (758, 566, 50), "r": (1242, 566, 50),
+}
+DS_LIT = (("select", BTN_BACK), ("start", BTN_START))
+# (SDL label at that position, glyph, dx, dy) as PS_FACES: by position, so
+# the DS's A is the east button whatever the pad prints on it.
+DS_FACES = (("A", "b", 0, 1), ("B", "a", 1, 0),
+            ("X", "y", -1, 0), ("Y", "x", 0, -1))
+
 # Everything that differs between handhelds; draw_handheld is the same for all.
 HANDHELDS = {
     "vita": (VITA_VIEWBOX, VITA_ANCHORS, VITA_LIT),
     "psp": (PSP_VIEWBOX, PSP_ANCHORS, VITA_LIT),
+    "ds": (DS_VIEWBOX, DS_ANCHORS, DS_LIT),
 }
 
 
@@ -6171,7 +6387,9 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
     ui.image(art(layout + "/body"), bx, by, bw, bh,
              color=blend(BG, FG, 0.55) if pad else blend(BG, FG, 0.25))
 
-    g = Bay(ui, bx, by, bw, bh, col, BG, pad is None, art="ps/")
+    ds = layout == "ds"
+    g = Bay(ui, bx, by, bw, bh, col, BG, pad is None,
+            art="ds/" if ds else "ps/")
     held = pad.held if pad else set()
     axes = pad.axes if pad else {}
 
@@ -6195,14 +6413,21 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
     if "face_size" in anchors:
         fside, fspread = (v * k for v in anchors["face_size"])
     fx0, fy0, _ = at("faces")
-    for letter, name, dx, dy in PS_FACES:
+    # A PlayStation shape is true on any pad; a DS letter only on a pad
+    # that prints the same letter in the same place — a Nintendo one.
+    wys = (nintendo_layout(pad) if ds else True) if pad else None
+    for letter, name, dx, dy in (DS_FACES if ds else PS_FACES):
         # A face glyph is a ring with a hole in it, so the dish line it sits
         # on would show through: cover it first. 0.375 of the box is the
         # glyph's own outer radius.
         ui.fill_circle(fx0 + dx * fspread, fy0 + dy * fspread,
                        fside * 0.375, BG)
         g.face(name, fx0 + dx * fspread, fy0 + dy * fspread, fside,
-               pressed=letter in live, wys=True if pad else None)
+               pressed=letter in live, wys=wys)
+    for name, btn in (("l", BTN_LSHOULDER), ("r", BTN_RSHOULDER)):
+        if name in anchors and btn in held:
+            sx, sy, ss = at(name)
+            g.glyph(name, sx, sy, ss, active=True)
     for name, btn, ax, ay in (("stick_l", BTN_LSTICK, 0, 1),
                               ("stick_r", BTN_RSTICK, 2, 3)):
         if name not in anchors:
@@ -6409,7 +6634,7 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "flycast": "dreamcast", "shadps4": "playstation",
                   "bigpemu": "xbox", "rmg": "n64", "m64py": "n64",
                   "rpcs3": "playstation", "vita3k": "vita",
-                  "ppsspp": "psp"}
+                  "ppsspp": "psp", "melonds": "ds"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -6585,6 +6810,8 @@ BACKEND_ENV = {
     "rpcs3": (VIRTUAL_PAD_HINT,),
     "vita3k": (VIRTUAL_PAD_HINT,),
     "ppsspp": (VIRTUAL_PAD_HINT,),
+    # melonDS's flatpak runs the KDE runtime's sdl2-compat: the same hiding.
+    "melonds": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -6720,6 +6947,8 @@ def main():
         cfg_path = find_vita3k_config(app_id, exe)
     elif backend == "ppsspp":
         cfg_path = find_ppsspp_config(app_id, exe)
+    elif backend == "melonds":
+        cfg_path = find_melonds_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -7137,6 +7366,8 @@ def main():
                 problems = write_vita3k_config(cfg_path, pads)
             elif backend == "ppsspp":
                 problems = write_ppsspp_config(cfg_path, pads)
+            elif backend == "melonds":
+                problems = write_melonds_config(cfg_path, pads, app_id, exe)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:
