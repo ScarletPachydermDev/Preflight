@@ -1425,6 +1425,7 @@ BACKENDS = {
     "ppsspp": ("ppsspp",),
     "melonds": ("melonds",),
     "play": ("purei",),
+    "azahar": ("azahar",),
 }
 
 
@@ -2646,6 +2647,115 @@ def write_ppsspp_config(cfg_path, pads):
         stamp = time.strftime("%Y%m%d-%H%M%S")
         shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"ppsspp-controls.{stamp}.ini"))
     write_ini(cfg_path, out)
+    return []
+
+
+# ----------------------------------------------------------------- azahar
+
+# Azahar (3DS), read out of its 2126.1.1 source (citra_qt/configuration/
+# config.cpp, input_common/sdl/sdl_impl.cpp, citra_qt/hotkeys.cpp):
+#
+# * qt-config.ini under $XDG_CONFIG_HOME/azahar-emu. [Controls] holds
+#   profiles\N\<button> (button_a ... button_zr, circle_pad, c_stick); the
+#   one in use is profile (0-based). A value is a ParamPackage,
+#   "key:value,...": engine:sdl with api:controller reads SDL's GAMEPAD
+#   button and axis numbers, so no raw translation is needed, and the pad
+#   is guid + port (the nth pad with that GUID, in SDL's order). Each key
+#   also has a "\default" flag that, when true, discards the value; it is
+#   written false.
+# * The flatpak runs sdl2-compat 2.32.70, as melonDS's does, so the GUIDs
+#   and order are listed inside its sandbox at write time (MELONDS_ENUM).
+# * Controller hotkeys are [Shortcuts] Main%20Window\<name>\
+#   controller_keyseq, one ParamPackage or two joined by "||". Guide is
+#   Steam's own menu in Game Mode, and the 3DS has no stick clicks, so L3
+#   swaps the screens and R3 cycles the layouts.
+AZAHAR_APP_ID = "org.azahar_emu.Azahar"
+# SDL2 gamepad numbers.
+AZAHAR_BUTTONS = {"button_a": 0, "button_b": 1, "button_x": 2,
+                  "button_y": 3, "button_up": 11, "button_down": 12,
+                  "button_left": 13, "button_right": 14, "button_l": 9,
+                  "button_r": 10, "button_start": 6, "button_select": 4}
+AZAHAR_MIRROR = {"button_a": 1, "button_b": 0, "button_x": 3, "button_y": 2}
+AZAHAR_TRIGGERS = {"button_zl": 4, "button_zr": 5}
+AZAHAR_STICKS = {"circle_pad": (0, 1), "c_stick": (2, 3)}
+AZAHAR_HOTKEYS = {"Swap Screens": 7, "Toggle Screen Layout": 8}
+
+
+def find_azahar_config(app_id=None, exe=None):
+    base = (os.environ.get("XDG_CONFIG_HOME") or "~/.config") if exe \
+        else f"~/.var/app/{app_id or AZAHAR_APP_ID}/config"
+    return os.path.expanduser(os.path.join(base, "azahar-emu", "qt-config.ini"))
+
+
+def write_azahar_config(cfg_path, pads, app_id=None, exe=None):
+    pad = next((p for p in pads if p.slot == 1), None)
+    if pad is None:
+        return ["no controller to set up"]
+    joys = melonds_joysticks(app_id or AZAHAR_APP_ID, exe)
+    if not joys:
+        return ["could not list the controllers the way Azahar will"]
+    port, hit = 0, None
+    for _index, guid, _mapping in joys:
+        if guid == pad.sdl_guid:
+            hit = guid
+            break
+    if hit is None:
+        return [f"{pad.label}: not among the devices Azahar will open"]
+    dev = f"engine:sdl,api:controller,guid:{hit},port:{port}"
+
+    def quoted(v):
+        return '"' + v + '"'
+
+    binds = dict(AZAHAR_BUTTONS)
+    if pad.swap_faces:
+        binds.update(AZAHAR_MIRROR)
+    values = {k: f"{dev},button:{n}" for k, n in binds.items()}
+    for k, axis in AZAHAR_TRIGGERS.items():
+        values[k] = f"{dev},axis:{axis},direction:+,threshold:0.5"
+    for k, (ax, ay) in AZAHAR_STICKS.items():
+        values[k] = f"{dev},axis_x:{ax},axis_y:{ay},deadzone:0.100000"
+    print(f"azahar: the handheld is {pad.label} = {hit} port {port}"
+          f"{' (faces mirrored)' if pad.swap_faces else ''}", flush=True)
+
+    sections = read_ini(cfg_path) if os.path.isfile(cfg_path) else []
+    if sections is None:
+        return ["cannot read qt-config.ini"]
+    controls = next((rows for name, rows in sections if name == "Controls"), None)
+    if controls is None:
+        controls = []
+        sections.append(("Controls", controls))
+    current = dict(controls)
+    try:
+        index = int(current.get("profile", "0")) + 1
+    except ValueError:
+        index = 1
+    if "profiles\\size" not in current:
+        controls += [("profile", "0"), ("profiles\\size", "1"),
+                     ("profiles\\1\\name", "Default")]
+        index = 1
+    ours = {}
+    for k, v in values.items():
+        ours[f"profiles\\{index}\\{k}"] = quoted(v)
+        ours[f"profiles\\{index}\\{k}\\default"] = "false"
+    controls[:] = [(k, v) for k, v in controls if k not in ours] + list(ours.items())
+
+    shortcuts = next((rows for name, rows in sections if name == "Shortcuts"), None)
+    if shortcuts is None:
+        shortcuts = []
+        sections.append(("Shortcuts", shortcuts))
+    hk = {}
+    for name, btn in AZAHAR_HOTKEYS.items():
+        key = "Main%20Window\\" + name.replace(" ", "%20") + "\\controller_keyseq"
+        hk[key] = quoted(f"{dev},button:{btn}")
+        hk[key + "\\default"] = "false"
+    shortcuts[:] = [(k, v) for k, v in shortcuts if k not in hk] + list(hk.items())
+
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    if os.path.isfile(cfg_path):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"azahar-qt-config.{stamp}.ini"))
+    write_ini(cfg_path, sections)
     return []
 
 
@@ -6541,7 +6651,7 @@ def glyph_bar(ui, items, hidden=(), rings=None):
 # that controls it. The pad that played last takes it again next time
 # (handheld_owner, saved by hardware id when the game starts); L3+R3 —
 # "claim handheld", always on offer, never spent — hands it to another.
-HANDHELD_LAYOUTS = {"vita", "psp", "ds"}
+HANDHELD_LAYOUTS = {"vita", "psp", "ds", "3ds"}
 HANDHELD_OWNERS = os.path.join(STATE_DIR, "handheld.json")
 
 # Where each control sits, in the outline's own viewBox (stage-art.py's
@@ -6581,6 +6691,18 @@ DS_ANCHORS = {
     "swap": (1350, 624, 56),
 }
 DS_LIT = (("select", BTN_BACK), ("start", BTN_START))
+# The New 3DS (stage-art.py's N3DS_VIEWBOX), drawn like the DS: the same
+# glyphs, letters and swap, plus the Circle Pad and C-Stick as the two
+# sticks, and ZL/ZR in the hinge beside L/R, shown only while held.
+N3DS_VIEWBOX = (590.0, 522.0, 820.0, 460.0)
+N3DS_ANCHORS = {
+    "dpad": (696, 827, 120), "stick_l": (696, 687, 96),
+    "stick_r": (1252, 639, 40), "faces": (1301, 732, 0),
+    "face_size": (60, 42), "l": (720, 563, 44), "zl": (770, 563, 44),
+    "zr": (1227, 563, 44), "r": (1277, 563, 44), "swap": (1352, 622, 50),
+}
+N3DS_LIT = (("select", BTN_BACK), ("start", BTN_START))
+
 # (SDL label, glyph, dx, dy) as PS_FACES. The DS's letters are LETTERS, as
 # on every Nintendo map: A is the pad's A, wherever it sits, unless the
 # player swaps with both triggers (pad.swap_faces, default WYSIWYG).
@@ -6592,6 +6714,7 @@ HANDHELDS = {
     "vita": (VITA_VIEWBOX, VITA_ANCHORS, VITA_LIT),
     "psp": (PSP_VIEWBOX, PSP_ANCHORS, VITA_LIT),
     "ds": (DS_VIEWBOX, DS_ANCHORS, DS_LIT),
+    "3ds": (N3DS_VIEWBOX, N3DS_ANCHORS, N3DS_LIT),
 }
 
 
@@ -6648,7 +6771,7 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
     ui.image(art(layout + "/body"), bx, by, bw, bh,
              color=blend(BG, FG, 0.55) if pad else blend(BG, FG, 0.25))
 
-    ds = layout == "ds"
+    ds = layout in ("ds", "3ds")
     g = Bay(ui, bx, by, bw, bh, col, BG, pad is None,
             art="ds/" if ds else "ps/")
     held = pad.held if pad else set()
@@ -6690,6 +6813,11 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
                pressed=letter in live, wys=wys)
     for name, btn in (("l", BTN_LSHOULDER), ("r", BTN_RSHOULDER)):
         if name in anchors and btn in held:
+            sx, sy, ss = at(name)
+            g.glyph(name, sx, sy, ss, active=True)
+    for name, ax in (("zl", sdlui.AXIS_TRIGGERLEFT),
+                     ("zr", sdlui.AXIS_TRIGGERRIGHT)):
+        if name in anchors and axes.get(ax, 0) > GC_SWAP_OFF:
             sx, sy, ss = at(name)
             g.glyph(name, sx, sy, ss, active=True)
     for name, btn, ax, ay in (("stick_l", BTN_LSTICK, 0, 1),
@@ -6910,7 +7038,7 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "bigpemu": "xbox", "rmg": "n64", "m64py": "n64",
                   "rpcs3": "playstation", "vita3k": "vita",
                   "ppsspp": "psp", "melonds": "ds",
-                  "play": "playstation"}
+                  "play": "playstation", "azahar": "3ds"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -7105,6 +7233,8 @@ BACKEND_ENV = {
     "ppsspp": (VIRTUAL_PAD_HINT,),
     # melonDS's flatpak runs the KDE runtime's sdl2-compat: the same hiding.
     "melonds": (VIRTUAL_PAD_HINT,),
+    # Azahar's flatpak runs the KDE runtime's sdl2-compat: the same hiding.
+    "azahar": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -7244,6 +7374,8 @@ def main():
         cfg_path = find_melonds_config(app_id, exe)
     elif backend == "play":
         cfg_path = find_play_config(app_id, exe)
+    elif backend == "azahar":
+        cfg_path = find_azahar_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -7404,7 +7536,7 @@ def main():
             if (layout_for(backend) not in ("playstation", "n64", "dreamcast",
                                             "vita", "psp")
                     and (update_shoulder_swap(pads, armed)
-                         if layout_for(backend) == "ds"
+                         if layout_for(backend) in ("ds", "3ds")
                          else update_trigger_swap(pads, armed))):
                 remember(pads, known)
             # Both of these pads quit through Z+Start: neither has a
@@ -7669,6 +7801,8 @@ def main():
                 problems = write_melonds_config(cfg_path, pads, app_id, exe)
             elif backend == "play":
                 problems = write_play_config(cfg_path, pads)
+            elif backend == "azahar":
+                problems = write_azahar_config(cfg_path, pads, app_id, exe)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:

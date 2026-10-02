@@ -818,6 +818,35 @@ DS_PARTS = {
 }
 
 
+def _side_tag(pack, ring_src, letter_src):
+    """Switch's SL/SR outline with its own lettering swapped for another
+    button's (ZL/ZR): the user's choice of shape for the 3DS's back
+    triggers. Returns (outline, press)."""
+    def load_sw(name):
+        return Image.open(os.path.join(pack, DC_SWITCH, name + ".png")).convert("RGBA")
+    ring = _dc_ring(white(load_sw(ring_src)))
+    src = white(load_sw(letter_src))
+    alpha = src.getchannel("A")
+    mask = Image.new("L", src.size, 0)
+    for part in components(alpha)[1:]:
+        for x, y in part:
+            mask.putpixel((x, y), 255)
+    letters = Image.new("RGBA", src.size, (255, 255, 255, 0))
+    letters.putalpha(ImageChops.multiply(alpha, mask.filter(ImageFilter.MaxFilter(3))))
+    letters = letters.crop(letters.getchannel("A").getbbox())
+    bb = ring.getchannel("A").getbbox()
+    placed = Image.new("RGBA", ring.size, (255, 255, 255, 0))
+    placed.paste(letters, ((bb[0] + bb[2]) // 2 - letters.width // 2,
+                           (bb[1] + bb[3]) // 2 - letters.height // 2))
+    outline = ring.copy()
+    outline.alpha_composite(placed)
+    solid = fill_holes(ring)
+    on = solid.copy()
+    on.putalpha(ImageChops.subtract(
+        solid.getchannel("A"), placed.getchannel("A").filter(ImageFilter.MaxFilter(3))))
+    return outline, on
+
+
 def ds(pack):
     """The DS outline and lit parts (cairosvg, dev only), and its glyphs."""
     import cairosvg
@@ -857,9 +886,59 @@ def ds(pack):
         white(load_w(f"wiiu_button_{key}_outline")).save(os.path.join(DS_DIR, key + ".png"))
         count += 1
     white(load_w("wiiu_dpad")).save(os.path.join(DS_DIR, "dpad.png"))
+    # The 3DS's extras: its sticks seen from above, and ZL/ZR as Switch's
+    # SL/SR shape with ZL/ZR lettering (the user's pick).
+    for key in ("l", "r"):
+        white(load_w(f"wiiu_stick_top_{key}")).save(os.path.join(DS_DIR, f"stick_{key}.png"))
+    for key in ("zl", "zr"):
+        outline, on = _side_tag(pack, f"switch_button_s{key[1]}_outline",
+                                f"switch_button_{key}_outline")
+        outline.save(os.path.join(DS_DIR, key + ".png"))
+        on.save(os.path.join(DS_DIR, key + "_on.png"))
+    count += 6
     for key in PS_ARMS:
         arm_only(load_w("wiiu_" + key)).save(os.path.join(DS_DIR, key + ".png"))
     return count + 1 + len(PS_ARMS)
+
+
+# The New 3DS, open, hinge and lower half, traced from the line art of a
+# New 3DS like the DS Lite's. Its glyphs are the DS set's.
+N3DS_DIR = os.path.join(SWITCH_DIR, "3ds")
+N3DS_VIEWBOX = (590, 522, 820, 460)
+N3DS_BODY = """
+<g stroke-width="5">
+<path d="M634 536 L1363 536 Q1390 536 1390 563 Q1390 590 1363 590 L634 590 Q607 590 607 563 Q607 536 634 536 Z"/>
+<path d="M607 563 L607 928 Q607 973 652 973 L1345 973 Q1390 973 1390 928 L1390 563"/>
+</g>
+<g stroke-width="4">
+<path d="M690 536 L690 590 M1305 536 L1305 590"/>
+<rect x="1336" y="555" width="14" height="14" rx="2" fill="#ffffff"/>
+<path d="M780 590 L780 943 Q780 968 805 968 L1192 968 Q1217 968 1217 943 L1217 590"/>
+<rect x="803" y="615" width="384" height="288" rx="6"/>
+<rect x="966" y="927" width="58" height="30" rx="10"/>
+<circle cx="696" cy="687" r="61"/>
+<circle cx="1252" cy="639" r="19"/>
+</g>"""
+N3DS_PARTS = {
+    "start": "M1232 864 A11 11 0 1 0 1254 864 A11 11 0 1 0 1232 864 Z",
+    "select": "M1232 910 A11 11 0 1 0 1254 910 A11 11 0 1 0 1232 910 Z",
+}
+
+
+def n3ds():
+    import cairosvg
+    os.makedirs(N3DS_DIR, exist_ok=True)
+    x, y, w, h = N3DS_VIEWBOX
+    head = VITA_HEAD.format(vb=f"{x} {y} {w} {h}", w=w * 2, h=h * 2)
+
+    def render(body, name):
+        cairosvg.svg2png(bytestring=(head + body + "</svg>").encode(),
+                         write_to=os.path.join(N3DS_DIR, name + ".png"))
+    render(N3DS_BODY, "body")
+    for key, d in N3DS_PARTS.items():
+        render(f'<path stroke-width="4" d="{d}"/>', key)
+        render(f'<path stroke-width="4" fill="#ffffff" d="{d}"/>', key + "_on")
+    return 1 + 2 * len(N3DS_PARTS)
 
 
 def xbox(pack):
@@ -901,7 +980,7 @@ def main():
     licence = os.path.join(pack, "License.txt")
     if not os.path.isdir(os.path.join(pack, GC_PACK)):
         sys.exit(f"no {GC_PACK} in {pack}")
-    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack) + dreamcast(pack) + vita() + psp() + ds(pack)
+    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack) + dreamcast(pack) + vita() + psp() + ds(pack) + n3ds()
     derived = switch_faces()
     if os.path.isfile(licence):
         shutil.copyfile(licence, os.path.join(SWITCH_DIR, "LICENSE-kenney.txt"))
