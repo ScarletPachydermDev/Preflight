@@ -6129,7 +6129,7 @@ def _glyph_metrics(ui, size):
 
     def glyph_w(g):
         if g.startswith("dot:"):
-            return pill_h * 0.55 + pill_h * 0.22 + ui.text_size(g[4:], size, True)[0]
+            return pill_h * 0.55 + pill_h * 0.45 + ui.text_size(g[4:], size, True)[0]
         if g.startswith("o:"):
             return max(pill_h, ui.text_size(g[2:], size, True)[0] + pill_h * 0.45)
         if g.startswith("sep"):
@@ -6187,7 +6187,7 @@ def _draw_glyph_item(ui, item, x, y_mid, size, bold=False):
             r = pill_h * 0.275
             ui.ring(x + r, y + pill_h / 2, r - max(2, pill_h * 0.07), r, FG)
             _, gth = ui.text_size(g[4:], size, True)
-            ui.text(g[4:], x + 2 * r + pill_h * 0.22, y + (pill_h - gth) / 2,
+            ui.text(g[4:], x + 2 * r + pill_h * 0.45, y + (pill_h - gth) / 2,
                     size, FG, bold=True)
         elif g.startswith("o:"):
             # A plain circle with the button's letter in it.
