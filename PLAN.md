@@ -759,6 +759,15 @@ claimer's buttons are set: `controller-binds` (15) and
 missing or the wrong length makes Vita3K reset both — written before YAML's
 trailing `...`. The user only cares that the claimed controller works.
 
+**PPSSPP and the PSP screen, as of 2026-10-02.** The PSP outline is a CC0
+drawing's own geometry (PSP 2000 White.svg by Paril, kept in
+`tools/psp-outline.json`). PPSSPP gives each pad its own device, 10 + SDL
+index, and a binding matches its device exactly; its defaults are on device
+10 only and put L/R on codes SDL never sends (194/195 where SDL sends
+193/192), so shoulders are dead out of the box. preflight writes
+controls.ini [ControlMapping] — every button, since one the file leaves out
+loses its default — with the stock keyboard plus the claimed pad.
+
 **Rumble is out of scope, deliberately.** It is the Rumble Pak, chosen at
 runtime by holding the hotkey and pressing B, and gopher64 hard-codes MemPak
 at startup for every game but Chameleon Twist (`get_default_handler`). No

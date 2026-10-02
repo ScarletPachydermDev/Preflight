@@ -43,6 +43,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | **M64Py** | flatpak | all four players' bindings in mupen64plus's SDL input plugin, laid out like gopher64's |
 | **RPCS3** | flatpak | all seven players' bindings through its SDL handler, by position like every PlayStation emulator |
 | **Vita3K** | AppImage | a Vita handheld screen; L3+R3 claims the handheld (remembered), and its buttons are set right for that controller |
+| **PPSSPP** | flatpak | a PSP handheld screen; binds the claimed controller under PPSSPP's own number for it, faces by position, and puts L/R where SDL sends them |
 
 ## Requirements
 

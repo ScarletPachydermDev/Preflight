@@ -1420,6 +1420,7 @@ BACKENDS = {
     "m64py": ("m64py",),
     "rpcs3": ("rpcs3",),
     "vita3k": ("vita3k",),
+    "ppsspp": ("ppsspp",),
 }
 
 
@@ -2558,6 +2559,88 @@ def write_pcsx2_config(cfg_path, pads, app_id=None, exe=None):
     os.makedirs(BACKUP_DIR, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"PCSX2.{stamp}.ini"))
+    write_ini(cfg_path, out)
+    return []
+
+
+# ----------------------------------------------------------------- ppsspp
+
+# Read out of PPSSPP v1.20.4's source (SDL/SDLJoystick.cpp, Core/KeyMap.cpp,
+# Core/KeyMapDefaults.cpp, Common/Input/{InputState.h,KeyCodes.h}):
+#
+# * Each pad is its own device, 10 + its SDL index at startup, and a binding
+#   matches its device EXACTLY — PPSSPP's own defaults are bound to device
+#   10 only. So the claimed pad is bound under its own number, found in SDL's
+#   order at write time (the flatpak's sdl2-compat lists pads as ours does,
+#   measured with Flycast's).
+# * SDL buttons arrive as Android-style codes: A 189, B 190, X 191, Y 188,
+#   RB 192, LB 193, Back 196, Start 197, Guide 4 (pause). PPSSPP's default pad
+#   table wants L/R on 194/195, which SDL never sends — shoulders are dead out
+#   of the box; here they are bound to what SDL does send. Axes are
+#   4000 + axis*2 (+1 for the negative half), axes raw SDL (0/1 left stick).
+# * controls.ini [ControlMapping], "device-code" lists; a button the file
+#   does not name loses its default (LoadFromIni), so the stock keyboard map
+#   is written alongside the pad.
+PPSSPP_APP_ID = "org.ppsspp.PPSSPP"
+PPSSPP_KEYBOARD = {
+    "Square": [29], "Triangle": [47], "Circle": [52], "Cross": [54],
+    "L": [45], "R": [51], "Start": [62], "Select": [66],
+    "Up": [19], "Down": [20], "Left": [21], "Right": [22],
+    "An.Up": [37], "An.Down": [39], "An.Left": [38], "An.Right": [40],
+    "RapidFire": [59], "Fast-forward": [61], "SpeedToggle": [68],
+    "Pause": [111], "Rewind": [67], "Analog limiter": [60],
+    "Toggle Debugger": [142], "Pause (no menu)": [138],
+}
+PPSSPP_PAD = {
+    "Cross": 189, "Circle": 190, "Square": 191, "Triangle": 188,
+    "Up": 19, "Down": 20, "Left": 21, "Right": 22,
+    "Start": 197, "Select": 196, "L": 193, "R": 192,
+    "An.Up": 4003, "An.Down": 4002, "An.Left": 4001, "An.Right": 4000,
+    "Pause": 4,
+}
+PPSSPP_MIRROR = {"Cross": 190, "Circle": 189, "Square": 188, "Triangle": 191}
+
+
+def find_ppsspp_config(app_id=None, exe=None):
+    if exe:
+        return os.path.expanduser("~/.config/ppsspp/PSP/SYSTEM/controls.ini")
+    return os.path.expanduser(
+        f"~/.var/app/{app_id or PPSSPP_APP_ID}/config/ppsspp/PSP/SYSTEM/controls.ini")
+
+
+def write_ppsspp_config(cfg_path, pads):
+    pad = next((p for p in pads if p.slot == 1), None)
+    if pad is None:
+        return ["no controller to set up"]
+    joys = flycast_joysticks()
+    index = next((i for i, (_inst, guid) in enumerate(joys or [])
+                  if guid == pad.sdl_guid), None)
+    if index is None:
+        return [f"{pad.label}: not among the devices PPSSPP will open"]
+    device = 10 + index
+    binds = dict(PPSSPP_PAD)
+    mirror = positional_swap(pad)
+    if mirror:
+        binds.update(PPSSPP_MIRROR)
+    rows = []
+    for name in dict.fromkeys(list(PPSSPP_KEYBOARD) + list(binds)):
+        codes = [f"1-{c}" for c in PPSSPP_KEYBOARD.get(name, [])]
+        if name in binds:
+            codes.append(f"{device}-{binds[name]}")
+        rows.append((name, ",".join(codes)))
+    print(f"ppsspp: the handheld is {pad.label} = pad device {device}"
+          f"{' (faces mirrored)' if mirror else ''}", flush=True)
+
+    sections = read_ini(cfg_path) if os.path.isfile(cfg_path) else []
+    if sections is None:
+        return ["cannot read controls.ini"]
+    out = [(n, r) for n, r in sections if n != "ControlMapping"]
+    out.append(("ControlMapping", rows))
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    if os.path.isfile(cfg_path):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(cfg_path, os.path.join(BACKUP_DIR, f"ppsspp-controls.{stamp}.ini"))
     write_ini(cfg_path, out)
     return []
 
@@ -6325,7 +6408,8 @@ BACKEND_LAYOUT = {"dolphin": "gamecube", "wheelwizard": "gamecube",
                   "xemu": "xbox", "pcsx2": "playstation", "xenia": "xbox",
                   "flycast": "dreamcast", "shadps4": "playstation",
                   "bigpemu": "xbox", "rmg": "n64", "m64py": "n64",
-                  "rpcs3": "playstation", "vita3k": "vita"}
+                  "rpcs3": "playstation", "vita3k": "vita",
+                  "ppsspp": "psp"}
 
 
 # Both triggers, firmly, mirrors the face buttons — on either map. It was the
@@ -6500,6 +6584,7 @@ BACKEND_ENV = {
     # RPCS3 bundles SDL 3.4.14: the same hiding.
     "rpcs3": (VIRTUAL_PAD_HINT,),
     "vita3k": (VIRTUAL_PAD_HINT,),
+    "ppsspp": (VIRTUAL_PAD_HINT,),
 }
 
 
@@ -6633,6 +6718,8 @@ def main():
         cfg_path = find_rpcs3_config(app_id, exe)
     elif backend == "vita3k":
         cfg_path = find_vita3k_config(app_id, exe)
+    elif backend == "ppsspp":
+        cfg_path = find_ppsspp_config(app_id, exe)
     elif backend == "ryujinx":
         cfg_path = find_config(app_id, exe)
     else:
@@ -7048,6 +7135,8 @@ def main():
                 problems = write_rpcs3_config(cfg_path, pads, app_id, exe)
             elif backend == "vita3k":
                 problems = write_vita3k_config(cfg_path, pads)
+            elif backend == "ppsspp":
+                problems = write_ppsspp_config(cfg_path, pads)
             else:
                 problems = write_config(cfg_path, pads, exe)
             if problems:
