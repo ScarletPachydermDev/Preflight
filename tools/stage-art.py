@@ -853,7 +853,7 @@ def ds(pack):
         count += 1
     # The legend's own glyphs, outlines like every legend glyph: the Wii U's
     # + and - stand for Start and Select, ZL and ZR are the swap gesture.
-    for key in ("plus", "minus", "zl", "zr"):
+    for key in ("plus", "minus", "zl", "zr", "l", "r"):
         white(load_w(f"wiiu_button_{key}_outline")).save(os.path.join(DS_DIR, key + ".png"))
         count += 1
     white(load_w("wiiu_dpad")).save(os.path.join(DS_DIR, "dpad.png"))

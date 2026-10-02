@@ -6112,6 +6112,7 @@ GLYPH_ART = {
     # The DS set, Kenney's Wii U glyphs: + and - for Start and Select.
     "ds:start": ("ds/plus", 1.0), "ds:select": ("ds/minus", 1.0),
     "ds:zl": ("ds/zl", 1.15), "ds:zr": ("ds/zr", 1.15),
+    "ds:l": ("ds/l", 1.15), "ds:r": ("ds/r", 1.15),
 }
 
 
@@ -6345,6 +6346,7 @@ DS_VIEWBOX = (600.0, 532.0, 800.0, 438.0)
 DS_ANCHORS = {
     "dpad": (707, 733, 140), "faces": (1294.5, 736, 0),
     "face_size": (64, 44.5), "l": (758, 566, 50), "r": (1242, 566, 50),
+    "swap": (1350, 624, 56),
 }
 DS_LIT = (("select", BTN_BACK), ("start", BTN_START))
 # (SDL label, glyph, dx, dy) as PS_FACES. The DS's letters are LETTERS, as
@@ -6482,12 +6484,13 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
         ([select, "sep "], None, FG, "hold to quit"),
     ]
     if ds:
-        items.insert(2, (["o:L", "sep+", "o:R"], None, FG, "swap ABXY"))
+        items.insert(2, (["ds:l", "sep+", "ds:r"], None, FG, "swap ABXY"))
         # A mapping that is not the truthful one is never invisible: the
-        # swap badge, top right of the console, as in the pad bays.
+        # swap badge, as in the pad bays, inside the console's top right,
+        # between the hinge and the X button.
         if pad and not pad_wysiwyg(pad):
-            side = ui.h * 0.075
-            swap_icon(ui, bx + bw - side * 0.5, by - side * 0.75, side, col)
+            sx, sy, ss = at("swap")
+            swap_icon(ui, sx, sy, ss, col)
     glyph_bar(ui, items, rings={0: (mine.get(BTN_START, 0.0), player_color(1)),
               len(items) - 1: (mine.get(BTN_BACK, 0.0), FG)})
 
