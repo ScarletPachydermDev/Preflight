@@ -2680,14 +2680,15 @@ for i in range(sdl.SDL_NumJoysticks()):
     print(i, b.value.decode(), ctypes.string_at(m).decode() if m else "",
           sep="\t")
 """
-# DS button -> SDL gamepad element, by position: A is east.
+# DS button -> SDL gamepad element, by LETTER: the pad's A is the DS's A,
+# mirrored when the player swapped (pad.swap_faces, WYSIWYG by default).
 MELONDS_MAP = {
-    "A": "b", "B": "a", "X": "y", "Y": "x",
+    "A": "a", "B": "b", "X": "x", "Y": "y",
     "L": "leftshoulder", "R": "rightshoulder",
     "Select": "back", "Start": "start",
     "Up": "dpup", "Down": "dpdown", "Left": "dpleft", "Right": "dpright",
 }
-MELONDS_MIRROR = {"A": "a", "B": "b", "X": "x", "Y": "y"}
+MELONDS_MIRROR = {"A": "b", "B": "a", "X": "y", "Y": "x"}
 # The stick half each d-pad direction also answers to.
 MELONDS_STICK = {"Up": ("lefty", "-"), "Down": ("lefty", "+"),
                  "Left": ("leftx", "-"), "Right": ("leftx", "+")}
@@ -2767,7 +2768,7 @@ def write_melonds_config(cfg_path, pads, app_id=None, exe=None):
             elements[key] = val
 
     table = dict(MELONDS_MAP)
-    mirror = positional_swap(pad)
+    mirror = bool(pad.swap_faces)
     if mirror:
         table.update(MELONDS_MIRROR)
     binds = {}
@@ -6108,6 +6109,9 @@ GLYPH_ART = {
     "xb:view": ("xbox/view", 1.0), "xb:menu": ("xbox/menu", 1.0),
     # The Dreamcast set.
     "dc:l": ("dc/l", 1.0), "dc:start": ("dc/start", 1.0),
+    # The DS set, Kenney's Wii U glyphs: + and - for Start and Select.
+    "ds:start": ("ds/plus", 1.0), "ds:select": ("ds/minus", 1.0),
+    "ds:zl": ("ds/zl", 1.15), "ds:zr": ("ds/zr", 1.15),
 }
 
 
@@ -6321,10 +6325,11 @@ DS_ANCHORS = {
     "face_size": (64, 44.5), "l": (758, 566, 50), "r": (1242, 566, 50),
 }
 DS_LIT = (("select", BTN_BACK), ("start", BTN_START))
-# (SDL label at that position, glyph, dx, dy) as PS_FACES: by position, so
-# the DS's A is the east button whatever the pad prints on it.
-DS_FACES = (("A", "b", 0, 1), ("B", "a", 1, 0),
-            ("X", "y", -1, 0), ("Y", "x", 0, -1))
+# (SDL label, glyph, dx, dy) as PS_FACES. The DS's letters are LETTERS, as
+# on every Nintendo map: A is the pad's A, wherever it sits, unless the
+# player swaps with both triggers (pad.swap_faces, default WYSIWYG).
+DS_FACES = (("A", "a", 1, 0), ("B", "b", 0, 1),
+            ("X", "x", 0, -1), ("Y", "y", -1, 0))
 
 # Everything that differs between handhelds; draw_handheld is the same for all.
 HANDHELDS = {
@@ -6407,15 +6412,18 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
 
     cx, cy, side = at("dpad")
     dpad_arms(g, cx, cy, side, held)
-    swap = positional_swap(pad) if pad else False
+    if ds:
+        swap = pad.swap_faces if pad else False
+    else:
+        swap = positional_swap(pad) if pad else False
     live = face_live(held, swap)
     fside, fspread = _ps_face_metrics(ui)
     if "face_size" in anchors:
         fside, fspread = (v * k for v in anchors["face_size"])
     fx0, fy0, _ = at("faces")
-    # A PlayStation shape is true on any pad; a DS letter only on a pad
-    # that prints the same letter in the same place — a Nintendo one.
-    wys = (nintendo_layout(pad) if ds else True) if pad else None
+    # A PlayStation shape is true on any pad; a DS letter when the swap
+    # setting makes the pad's printed A act as A.
+    wys = (pad_wysiwyg(pad) if ds else True) if pad else None
     for letter, name, dx, dy in (DS_FACES if ds else PS_FACES):
         # A face glyph is a ring with a hole in it, so the dish line it sits
         # on would show through: cover it first. 0.375 of the box is the
@@ -6444,12 +6452,16 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
 
     # "sep " is an empty joiner: room for the hold ring between the glyph
     # and its words, so the dots never sit on the text.
-    glyph_bar(ui, [
-        (["ps:start", "sep "], "P1", player_color(1), "hold to start"),
+    p = "ds:" if ds else "ps:"
+    items = [
+        ([p + "start", "sep "], "P1", player_color(1), "hold to start"),
         (["L3", "sep+", "R3"], None, None, "claim handheld"),
-        (["ps:select", "sep "], None, FG, "hold to quit"),
-    ], rings={0: (mine.get(BTN_START, 0.0), player_color(1)),
-              2: (mine.get(BTN_BACK, 0.0), FG)})
+        ([p + "select", "sep "], None, FG, "hold to quit"),
+    ]
+    if ds:
+        items.insert(2, (["ds:zl", "sep+", "ds:zr"], None, FG, "swap ABXY"))
+    glyph_bar(ui, items, rings={0: (mine.get(BTN_START, 0.0), player_color(1)),
+              len(items) - 1: (mine.get(BTN_BACK, 0.0), FG)})
 
 
 def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
@@ -7105,7 +7117,9 @@ def main():
             # Nor on the Dreamcast map: Flycast remaps by device name, and
             # every Steam virtual pad has the same one, so a swap there
             # could not be written.
-            if (layout_for(backend) not in ("playstation", "n64", "dreamcast")
+            # Nor on the Vita or PSP: their shapes are positions too.
+            if (layout_for(backend) not in ("playstation", "n64", "dreamcast",
+                                            "vita", "psp")
                     and update_trigger_swap(pads, armed)):
                 remember(pads, known)
             # Both of these pads quit through Z+Start: neither has a
