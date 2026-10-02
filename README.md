@@ -22,33 +22,33 @@ players wait while you work out whose controller is which and inputs work. Just 
 - That the config it writes has no missing bindings — a blank stick in the
   emulator's saved settings is otherwise invisible until the game starts
 
-## Supported emulators
+## Supported emulators, all of them in SelfSteam
 
 | Emulator | Package | Notes |
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage | Pro Controllers |
 | **Eden** | flatpak, AppImage | Pro Controllers. **Steam Input on only** |
-| **Dolphin** | flatpak | GameCube pads only; Wii remotes untouched. The 2026 Steam Controller doesn't work in it |
+| **Dolphin** | flatpak | GameCube pads only; Wii remotes untouched. |
 | **Wheel Wizard** | flatpak | writes Dolphin's GameCube pads |
 | **Cemu** | flatpak | P1 GamePad or Pro Controller (**+**/**−**, remembered per game) |
-| **gopher64** | flatpak | enables ports 2-4 |
+| **gopher64** | flatpak | No rumble |
 | **Rosalie's Mupen GUI** | flatpak | Rumble Pak on |
 | **M64Py** | flatpak | Rumble Pak on |
-| **DuckStation** | AppImage | multitap for 3+. **Steam Input on only** |
-| **PCSX2** | flatpak | multitap for 3+ |
+| **DuckStation** | AppImage | **Steam Input on only** |
+| **PCSX2** | flatpak |  |
 | **Play!** | flatpak | only one Steam Controller per game |
 | **RPCS3** | flatpak |  |
 | **shadPS4** | flatpak | **no claim P1**: seats pads in SDL's order |
 | **xemu** | flatpak |  |
 | **Xenia Canary** | AppImage | **no claim P1**: seats pads in Steam's order |
-| **Flycast** | flatpak | plugs a controller into each port used |
-| **BigPEmu** | flatpak | Pause on Start, Option on Back |
-| **Vita3K** | AppImage | L3+R3 claims the handheld |
-| **PPSSPP** | flatpak | L3+R3 claims the handheld |
-| **melonDS** | flatpak | L+R swaps ABXY; L3 swaps screens |
-| **Azahar** | flatpak | L+R swaps ABXY; L3 swaps screens, R3 cycles layouts |
+| **Flycast** | flatpak | |
+| **BigPEmu** | flatpak | |
+| **Vita3K** | AppImage |  |
+| **PPSSPP** | flatpak |  |
+| **melonDS** | flatpak | L3 swaps screens |
+| **Azahar** | flatpak |  L3 swaps screens, R3 cycles layouts |
 
-- PlayStation emulators bind by position: Cross is the bottom button on any pad.
+- PlayStation emulators bind by position: Cross is the bottom button (south) on any pad for example.
 - Handhelds remember the last controller played, except a Steam Controller
   (it has no hardware id).
 - All verified with Steam Input **on**. Steam Input off is untested on most.
