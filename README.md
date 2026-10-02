@@ -24,29 +24,29 @@ players wait while you work out whose controller is which and inputs work. Just 
 
 ## Supported emulators
 
-| Emulator | Package | Players | Notes |
-|:---|:---|:---|:---|
-| **Ryubing (Ryujinx)** | `io.github.ryubing.Ryujinx`, AppImage | 4 | Pro Controllers |
-| **Eden** | `dev.eden_emu.eden`, AppImage | 4 | Pro Controllers. **Steam Input on only** |
-| **Dolphin** | `org.DolphinEmu.dolphin-emu` | 4 | GameCube pads only; Wii remotes untouched. Steam Controller can't be bound |
-| **Wheel Wizard** | `io.github.TeamWheelWizard.WheelWizard` | 4 | writes Dolphin's GameCube pads |
-| **Cemu** | `info.cemu.Cemu` | 4 | P1 GamePad or Pro Controller (**+**/**−**, remembered per game) |
-| **gopher64** | `io.github.gopher64.gopher64` | 4 | enables ports 2-4 |
-| **Rosalie's Mupen GUI** | `com.github.Rosalie241.RMG` | 4 | Rumble Pak on |
-| **M64Py** | `net.sourceforge.m64py.M64Py` | 4 | Rumble Pak on |
-| **DuckStation** | AppImage | 4 | multitap for 3+. **Steam Input on only** |
-| **PCSX2** | `net.pcsx2.PCSX2` | 4 | multitap for 3+ |
-| **Play!** | `org.purei.Play` | 2 | reads controllers below Steam; only one Steam Controller can be seated |
-| **RPCS3** | `net.rpcs3.RPCS3` | 7 | |
-| **shadPS4** | `net.shadps4.shadPS4` | 4 | **no claim P1**: seats pads in SDL's order |
-| **xemu** | `app.xemu.xemu` | 4 | |
-| **Xenia Canary** | AppImage | 4 | **no claim P1**: seats pads in Steam's order |
-| **Flycast** | `org.flycast.Flycast` | 4 | plugs a controller into each port used |
-| **BigPEmu** | `com.richwhitehouse.BigPEmu` | 2 (4 Team Tap) | Pause on Start, Option on Back |
-| **Vita3K** | AppImage | handheld | L3+R3 claims the handheld |
-| **PPSSPP** | `org.ppsspp.PPSSPP` | handheld | L3+R3 claims the handheld |
-| **melonDS** | `net.kuribo64.melonDS` | handheld | L+R swaps ABXY; L3 swaps screens |
-| **Azahar** | `org.azahar_emu.Azahar` | handheld | L+R swaps ABXY; L3 swaps screens, R3 cycles layouts |
+| Emulator | Package | Notes |
+|:---|:---|:---|
+| **Ryubing (Ryujinx)** | flatpak, AppImage | Pro Controllers |
+| **Eden** | flatpak, AppImage | Pro Controllers. **Steam Input on only** |
+| **Dolphin** | flatpak | GameCube pads only; Wii remotes untouched. The 2026 Steam Controller doesn't work in it |
+| **Wheel Wizard** | flatpak | writes Dolphin's GameCube pads |
+| **Cemu** | flatpak | P1 GamePad or Pro Controller (**+**/**−**, remembered per game) |
+| **gopher64** | flatpak | enables ports 2-4 |
+| **Rosalie's Mupen GUI** | flatpak | Rumble Pak on |
+| **M64Py** | flatpak | Rumble Pak on |
+| **DuckStation** | AppImage | multitap for 3+. **Steam Input on only** |
+| **PCSX2** | flatpak | multitap for 3+ |
+| **Play!** | flatpak | only one Steam Controller per game |
+| **RPCS3** | flatpak |  |
+| **shadPS4** | flatpak | **no claim P1**: seats pads in SDL's order |
+| **xemu** | flatpak |  |
+| **Xenia Canary** | AppImage | **no claim P1**: seats pads in Steam's order |
+| **Flycast** | flatpak | plugs a controller into each port used |
+| **BigPEmu** | flatpak | Pause on Start, Option on Back |
+| **Vita3K** | AppImage | L3+R3 claims the handheld |
+| **PPSSPP** | flatpak | L3+R3 claims the handheld |
+| **melonDS** | flatpak | L+R swaps ABXY; L3 swaps screens |
+| **Azahar** | flatpak | L+R swaps ABXY; L3 swaps screens, R3 cycles layouts |
 
 - PlayStation emulators bind by position: Cross is the bottom button on any pad.
 - Handhelds remember the last controller played, except a Steam Controller
