@@ -2665,8 +2665,9 @@ def write_ppsspp_config(cfg_path, pads):
 #   written false.
 # * The flatpak runs sdl2-compat 2.32.70, as melonDS's does, so the GUIDs
 #   and order are listed inside its sandbox at write time (MELONDS_ENUM).
-# * Controller hotkeys are [Shortcuts] Main%20Window\<name>\
-#   controller_keyseq, one ParamPackage or two joined by "||". Guide is
+# * Controller hotkeys are [UI] Shortcuts\Main%20Window\<name>\
+#   controller_keyseq (the Shortcuts group is opened inside UI's — a
+#   top-level [Shortcuts] section is never read), one ParamPackage or two joined by "||". Guide is
 #   Steam's own menu in Game Mode, and the 3DS has no stick clicks, so L3
 #   swaps the screens and R3 cycles the layouts.
 AZAHAR_APP_ID = "org.azahar_emu.Azahar"
@@ -2739,13 +2740,16 @@ def write_azahar_config(cfg_path, pads, app_id=None, exe=None):
         ours[f"profiles\\{index}\\{k}\\default"] = "false"
     controls[:] = [(k, v) for k, v in controls if k not in ours] + list(ours.items())
 
-    shortcuts = next((rows for name, rows in sections if name == "Shortcuts"), None)
+    # 0.2.128 wrote these to a top-level [Shortcuts] Azahar never reads.
+    sections = [(n, r) for n, r in sections if n != "Shortcuts"]
+    shortcuts = next((rows for name, rows in sections if name == "UI"), None)
     if shortcuts is None:
         shortcuts = []
-        sections.append(("Shortcuts", shortcuts))
+        sections.append(("UI", shortcuts))
     hk = {}
     for name, btn in AZAHAR_HOTKEYS.items():
-        key = "Main%20Window\\" + name.replace(" ", "%20") + "\\controller_keyseq"
+        key = ("Shortcuts\\Main%20Window\\" + name.replace(" ", "%20")
+               + "\\controller_keyseq")
         hk[key] = quoted(f"{dev},button:{btn}")
         hk[key + "\\default"] = "false"
     shortcuts[:] = [(k, v) for k, v in shortcuts if k not in hk] + list(hk.items())
