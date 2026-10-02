@@ -766,6 +766,32 @@ def vita():
     return 1 + 2 * len(VITA_PARTS)
 
 
+# The PSP: geometry taken straight from a CC0 drawing (see the _source note in
+# tools/psp-outline.json), not redrawn — only the parts the screen needs.
+PSP_DIR = os.path.join(SWITCH_DIR, "psp")
+PSP_BODY = ("body", "screen", "dpad_dish", "face_dish", "volm", "volp", "disp", "snd")
+PSP_LIT = ("l", "r", "ps", "select", "start")
+
+
+def psp():
+    import cairosvg
+    import json as _json
+    src = _json.load(open(os.path.join(HERE, "tools", "psp-outline.json")))
+    x, y, w, h = src["_viewbox"]
+    head = VITA_HEAD.format(vb=f"{x} {y} {w} {h}", w=w, h=h)
+    os.makedirs(PSP_DIR, exist_ok=True)
+
+    def render(body, name):
+        cairosvg.svg2png(bytestring=(head + body + "</svg>").encode(),
+                         write_to=os.path.join(PSP_DIR, name + ".png"))
+    render(f'<path stroke-width="12" d="{src["body"]}"/>' + "".join(
+        f'<path stroke-width="7" d="{src[k]}"/>' for k in PSP_BODY[1:]), "body")
+    for key in PSP_LIT:
+        render(f'<path stroke-width="7" d="{src[key]}"/>', key)
+        render(f'<path stroke-width="7" fill="#ffffff" d="{src[key]}"/>', key + "_on")
+    return 1 + 2 * len(PSP_LIT)
+
+
 def xbox(pack):
     """The Xbox set, from the pack — ps() in another family."""
     os.makedirs(XBOX_DIR, exist_ok=True)
@@ -805,7 +831,7 @@ def main():
     licence = os.path.join(pack, "License.txt")
     if not os.path.isdir(os.path.join(pack, GC_PACK)):
         sys.exit(f"no {GC_PACK} in {pack}")
-    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack) + dreamcast(pack) + vita()
+    staged = gamecube(pack) + n64() + ps(pack) + xbox(pack) + dreamcast(pack) + vita() + psp()
     derived = switch_faces()
     if os.path.isfile(licence):
         shutil.copyfile(licence, os.path.join(SWITCH_DIR, "LICENSE-kenney.txt"))

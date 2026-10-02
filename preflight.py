@@ -5925,7 +5925,7 @@ def _draw_glyph_item(ui, item, x, y_mid, size, bold=False):
     return (x + ui.text_size(label, size, bold)[0]) - x0
 
 
-def glyph_bar(ui, items, hidden=()):
+def glyph_bar(ui, items, hidden=(), rings=None):
     """The legend along the bottom, drawn with the same shapes as the pads.
 
     Each entry is (glyphs, token, token_colour, label). The glyphs stay
@@ -5978,6 +5978,17 @@ def glyph_bar(ui, items, hidden=()):
     for i, (item, x) in enumerate(zip(items, xs)):
         if i not in hidden:
             _draw_glyph_item(ui, item, x, y_mid, size, bold=(i == 0))
+        # A hold in progress, round the entry's first glyph. Its radius
+        # stops short of the token or label beside it: the glyph's half
+        # width plus less than the gap that separates the two, dots included.
+        if rings and i in rings and rings[i][0] > 0:
+            frac, colour = rings[i]
+            _pill_h, _gw, spacing = _glyph_metrics(ui, size)
+            first = item[0][0]
+            gw0 = _item_glyph_widths(ui, item[0], size)[first]
+            radius = gw0 / 2 + spacing * 0.30
+            hold_ring(ui, x + gw0 / 2, y_mid, radius, frac, colour,
+                      blend(BG, FG, 0.18))
 
 
 # ------------------------------------------------------------- handhelds
@@ -5988,7 +5999,7 @@ def glyph_bar(ui, items, hidden=()):
 # that controls it. The pad that played last takes it again next time
 # (handheld_owner, saved by hardware id when the game starts); L3+R3 —
 # "claim handheld", always on offer, never spent — hands it to another.
-HANDHELD_LAYOUTS = {"vita"}
+HANDHELD_LAYOUTS = {"vita", "psp"}
 HANDHELD_OWNERS = os.path.join(STATE_DIR, "handheld.json")
 
 # Where each control sits, in the outline's own viewBox (stage-art.py's
@@ -6003,6 +6014,25 @@ VITA_ANCHORS = {
 # each a layer the size of the body.
 VITA_LIT = (("l", BTN_LSHOULDER), ("r", BTN_RSHOULDER), ("ps", BTN_GUIDE),
             ("select", BTN_BACK), ("start", BTN_START))
+
+# The PSP, from a CC0 drawing (tools/psp-outline.json; viewBox there). One
+# stick, the nub; Home is its PS-button part and lights from Guide.
+PSP_VIEWBOX = (10.0, 10.0, 1980.0, 846.0)
+PSP_ANCHORS = {
+    # The d-pad fills its dish: the glyph's ink is 0.75 of its box, and the
+    # dish is 299 across inside its own line. The face buttons sit ON their
+    # ring, as on the console — the ring through their centres, at the
+    # drawing's own button size — rather than at the PS2/PS3 screen's.
+    "dpad": (238, 386, 373), "stick_l": (245, 648, 104),
+    "faces": (1771, 388, 0), "face_size": (136, 113),
+    "start": (1548, 796, 58), "select": (1421, 796, 58),
+}
+
+# Everything that differs between handhelds; draw_handheld is the same for all.
+HANDHELDS = {
+    "vita": (VITA_VIEWBOX, VITA_ANCHORS, VITA_LIT),
+    "psp": (PSP_VIEWBOX, PSP_ANCHORS, VITA_LIT),
+}
 
 
 def _ps_face_metrics(ui):
@@ -6046,7 +6076,8 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
                alert=alert)
     pad = next((p for p in pads if p.slot == 1), None)
     col = player_color(1) if pad else DIM
-    vx, vy, vw, vh = VITA_VIEWBOX
+    viewbox, anchors, lit_parts = HANDHELDS[layout]
+    vx, vy, vw, vh = viewbox
     bw = ui.w * 0.80
     bh = bw * vh / vw
     if bh > ui.h * 0.62:
@@ -6062,12 +6093,12 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
     axes = pad.axes if pad else {}
 
     def at(name):
-        x, y, size = VITA_ANCHORS[name]
+        x, y, size = anchors[name]
         return bx + (x - vx) * k, by + (y - vy) * k, size * k
 
     # The shoulders, Select, Start and the PS button are the drawing's own
     # shapes, lit where they are rather than replaced by a glyph.
-    for name, btn in VITA_LIT:
+    for name, btn in lit_parts:
         lit = btn in held
         ui.image(art(f"{layout}/{name}" + ("_on" if lit else "")),
                  bx, by, bw, bh,
@@ -6078,30 +6109,39 @@ def draw_handheld(ui, pads, holds, layout, alert=None):
     swap = positional_swap(pad) if pad else False
     live = face_live(held, swap)
     fside, fspread = _ps_face_metrics(ui)
+    if "face_size" in anchors:
+        fside, fspread = (v * k for v in anchors["face_size"])
     fx0, fy0, _ = at("faces")
     for letter, name, dx, dy in PS_FACES:
+        # A face glyph is a ring with a hole in it, so the dish line it sits
+        # on would show through: cover it first. 0.375 of the box is the
+        # glyph's own outer radius.
+        ui.fill_circle(fx0 + dx * fspread, fy0 + dy * fspread,
+                       fside * 0.375, BG)
         g.face(name, fx0 + dx * fspread, fy0 + dy * fspread, fside,
                pressed=letter in live, wys=True if pad else None)
     for name, btn, ax, ay in (("stick_l", BTN_LSTICK, 0, 1),
                               ("stick_r", BTN_RSTICK, 2, 3)):
+        if name not in anchors:
+            continue
         sx, sy, ss = at(name)
         stick(g, sx, sy, ss, ss * 0.22, axes, ax, ay, name, btn in held)
-    for name, btn in (("select", BTN_BACK), ("start", BTN_START)):
-        gx, gy, gs = at(name)
-        hold = (holds.get(pad.key) or {}).get(btn, 0.0) if pad else 0.0
-        if hold > 0:
-            hold_ring(ui, gx, gy, gs, hold, FG if btn == BTN_BACK
-                      else col, g.track)
+    # The hold progress is shown on the legend's Start and Select, not on
+    # the console: the ring was too big for the buttons it circled.
+    mine = (holds.get(pad.key) or {}) if pad else {}
 
     label = pad.label if pad else "— no controller —"
     ui.text(label, ui.w // 2, int(by + bh + ui.h * 0.025), "body",
             FG if pad else blend(BG, DIM, 0.75), center=True)
 
+    # "sep " is an empty joiner: room for the hold ring between the glyph
+    # and its words, so the dots never sit on the text.
     glyph_bar(ui, [
-        (["ps:start"], "P1", player_color(1), "hold to start"),
+        (["ps:start", "sep "], "P1", player_color(1), "hold to start"),
         (["L3", "sep+", "R3"], None, None, "claim handheld"),
-        (["ps:select"], None, FG, "hold to quit"),
-    ])
+        (["ps:select", "sep "], None, FG, "hold to quit"),
+    ], rings={0: (mine.get(BTN_START, 0.0), player_color(1)),
+              2: (mine.get(BTN_BACK, 0.0), FG)})
 
 
 def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
