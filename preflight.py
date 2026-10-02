@@ -7495,6 +7495,18 @@ def main():
             # than useless on a screen someone is trying to read. Elimination
             # now covers that case, and what it cannot cover is in the log.
 
+            # Play! tells pads apart by their hardware; every pad with none
+            # (a Steam Controller) is the same virtual device to it, so only
+            # the first is bound (write_play_config). A pad not yet matched to
+            # its hardware looks the same until it is pressed, hence the hint.
+            if backend == "play":
+                bare = sorted((p for p in pads if p.slot and not p.real),
+                              key=lambda p: p.slot)
+                for p in bare[1:]:
+                    warnings.append(
+                        f"P{p.slot}: Play! can use only one Steam Controller "
+                        f"— this one won't be bound. Another kind of "
+                        f"pad? Press a button on it.")
             for name in unmapped:
                 warnings.append(f"{name}: SDL has no mapping for this pad, "
                                 "so it cannot be used.")
