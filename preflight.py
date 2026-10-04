@@ -5505,6 +5505,16 @@ def write_dolphin_config(cfg_dir, pads):
     for pad in assigned:
         face = (DOLPHIN_EVDEV_MIRRORED if pad.swap_faces
                 else DOLPHIN_EVDEV_IDENTITY)
+        # The Xbox driver, and Steam's virtual pad that copies it, sends
+        # NORTH (307) for its LEFT button and WEST for its top one — the
+        # reverse of the gamepad API — so X and Y came out swapped in game
+        # (found 2026-10-04, as in Play!).
+        real = pad.real or {}
+        name = devices[pad.key].lower()
+        if (real.get("vendor") == 0x045E or "x-box" in name or "xbox" in name
+                or (not pad.real and (pad.vendor, pad.product) == STEAM_VIRTUAL)):
+            flip = {"NORTH": "WEST", "WEST": "NORTH"}
+            face = {k: flip.get(v, v) for k, v in face.items()}
         rows = [("Device", devices[pad.key])]
         fields = dict(face, **evdev_axis_map(pad))
         rows += [(k, v.format(**fields)) for k, v in DOLPHIN_GC_EVDEV_TEMPLATE]
