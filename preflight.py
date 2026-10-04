@@ -6577,6 +6577,10 @@ def _draw_glyph_item(ui, item, x, y_mid, size, bold=False):
     return (x + ui.text_size(label, size, bold)[0]) - x0
 
 
+LEGEND_SHORT = {"hold to start": "start", "hold to quit": "quit",
+                "claim handheld": "claim", "swap ABXY": "swap"}
+
+
 def glyph_bar(ui, items, hidden=(), rings=None):
     """The legend along the bottom, drawn with the same shapes as the pads.
 
@@ -6601,15 +6605,29 @@ def glyph_bar(ui, items, hidden=(), rings=None):
     margin = int(ui.w * 0.05)
     y_mid = int(ui.h * 0.925)
 
-    def fits(size):
+    def fits(size, spread):
         widths = [_glyph_item_width(ui, it, size, bold=(i == 0))
                   for i, it in enumerate(items)]
         _, _, spacing = _glyph_metrics(ui, size)
-        gap = spacing * 3.4
+        gap = spacing * spread
         return widths, gap, sum(widths) + gap * (len(items) - 1)
 
-    for size in ("body", "small"):
-        widths, gap, total = fits(size)
+    # Tighter gaps before smaller text: on a Steam Deck's 1280x800 the
+    # four- and five-entry legends fell to the small size, which is hard to
+    # read on a 7" screen, when closing the gaps alone made them fit.
+    # Then shorter words, still at full size: "hold to" is what the ring
+    # already shows, and the glyphs say the rest.
+    full = items
+
+    def short(its):
+        return [(g, t, c, LEGEND_SHORT.get(l, l)) for g, t, c, l in its]
+
+    for words, size, spread in ((full, "body", 3.4), (full, "body", 2.2),
+                                (full, "body", 1.4), (short(full), "body", 1.4),
+                                (short(full), "small", 2.2),
+                                (short(full), "small", 1.2)):
+        items = words
+        widths, gap, total = fits(size, spread)
         if total <= ui.w - margin * 2:
             break
 
@@ -6918,12 +6936,14 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
         if layout == "n64":
             # This map is a tall one — the C cross climbs two and a half
             # buttons above A — so it is given the slack the others leave
-            # between the strip and the controller's name.
-            top, under = 0.10, 0.11
+            # between the strip and the controller's name; it starts a
+            # little lower so its Z clears the bay's "P1" on a 16:10 Deck.
+            top, under = 0.17, 0.11
         # 0.70 of the bay, not 0.62: raising the map left slack between it
         # and the label, and a taller strip makes every glyph bigger on a
         # screen being read from a sofa.
-        pw, ph = int(cw * 0.92), int(ch * (0.82 if layout == "n64" else 0.70))
+        pw = int(cw * 0.92)
+        ph = int(ch * (0.75 if layout == "n64" else 0.70))
         card_bg = blend(BG, col, 0.30 if buzzing else 0.10)
         draw_gamepad(ui, cx + (cw - pw) / 2, cy + ch * top, pw, ph, col,
                      pad.held if pad else set(), pad.axes if pad else {},
@@ -7013,9 +7033,11 @@ def draw_pad_grid(ui, pads, cycle, warnings, needed, holds, p1_claimed,
         if wiiu:
             # Says what P1 IS, not what pressing does: the thing to check
             # before starting is which controller the game will be offered.
+            # Short: the bay's corner icon already shows which it is, so
+            # this only has to say that + and - change it. The long
+            # wording overflowed the legend on a Steam Deck.
             items.insert(3, (["+", "sep+", "\u2013"], "P1", p1c,
-                             "is a Wii U Pro Controller" if wiiu == "pro"
-                             else "is a Wii U GamePad"))
+                             "GamePad / Pro"))
     glyph_bar(ui, items, hidden={1} if p1_claimed else ())
 
 
