@@ -2778,8 +2778,12 @@ def write_azahar_config(cfg_path, pads, app_id=None, exe=None):
 #   by its MAC (preflight's pairing already found it); only a pad with none,
 #   a Steam Controller, is bound to the virtual id, and only one such pad
 #   can be seated without the others driving it too.
-# * Codes are the kernel's, which are POSITIONS (BTN_SOUTH is the bottom
-#   button) — what a PlayStation map wants, whatever is printed on the pad.
+# * Codes are the kernel's, which are meant to be POSITIONS (BTN_SOUTH is
+#   the bottom button) — what a PlayStation map wants. Except the top and
+#   left pair: the gamepad API says 307 (BTN_NORTH) is the top button, but
+#   the Xbox driver, and Steam's virtual pad which copies it, sends 307 for
+#   X, the LEFT one. So for Xbox-style devices Triangle and Square trade
+#   codes (_play_xbox_style); found in padtest, 2026-10-04.
 # * An absolute axis whose `flat` is 0 is treated as a hat: -1/0/+1 become
 #   4/8/0, and anything else passes through raw under the hat type. So the
 #   d-pad hat is a POVHAT binding per direction, and an analog trigger with
@@ -2856,10 +2860,20 @@ def play_devices():
         except ValueError:
             continue
         out.append({"node": "/dev/input/" + os.path.basename(base),
+                    "name": sysfs_read(f"{dev}/name") or "",
                     "vendor": ids[0], "product": ids[1], "version": ids[2],
                     "uniq": sysfs_read(f"{dev}/uniq") or "",
                     "keys": keys, "abs": _sysfs_bits(f"{dev}/capabilities/abs")})
     return out
+
+
+def _play_xbox_style(dev):
+    """True for a device that sends 307 for its LEFT face button, as the
+    Xbox driver does: Steam's virtual pad, Microsoft's pads, xpad."""
+    if (dev["vendor"], dev["product"]) == STEAM_VIRTUAL or dev["vendor"] == 0x045E:
+        return True
+    name = dev.get("name", "").lower()
+    return "x-box" in name or "xbox" in name
 
 
 def play_device_id(dev):
@@ -2938,9 +2952,12 @@ def write_play_config(cfg_path, pads):
                 continue
             dev_id = play_device_id(dev)
             node, keys, axes = dev["node"], dev["keys"], dev["abs"]
-            if button in PLAY_KEYS and PLAY_KEYS[button] in keys:
+            codes = dict(PLAY_KEYS)
+            if _play_xbox_style(dev):
+                codes["triangle"], codes["square"] = 308, 307
+            if button in codes and codes[button] in keys:
                 pref(f"{base}.bindingtype", "integer", 1)
-                target(base, dev_id, PLAY_KEYS[button], 0)
+                target(base, dev_id, codes[button], 0)
             elif button in PLAY_DPAD:
                 btn, hat, ref = PLAY_DPAD[button]
                 if btn in keys:
