@@ -1896,13 +1896,25 @@ def eden_identity(pad, rows):
     which has no MAC but does carry a unique name-CRC.
     """
     if rows:
+        # Eden's port is NOT the enumeration index: it is the pad's place
+        # among devices with the same (CRC-zeroed) GUID, counted in SDL's
+        # order. With Steam Input every virtual pad zeroes to one GUID, and
+        # the real pads Steam hides from games are listed between them in
+        # our enumeration — so the index gave 0,2,4,6 for four virtual pads,
+        # P3/P4 pointed at nothing and Rhythm Paradise Groove saw two
+        # players (2026-10-15). Two players had worked only because the
+        # virtual pads happened to be listed first.
+        def nth(i):
+            g = eden_guid(rows[i][1])
+            return sum(1 for r in rows[:i] if eden_guid(r[1]) == g)
+
         if pad.mac:
-            for port, guid, mac in rows:
+            for i, (_port, guid, mac) in enumerate(rows):
                 if mac and mac.lower() == pad.mac.lower():
-                    return port, guid
-        for port, guid, _mac in rows:
+                    return nth(i), guid
+        for i, (_port, guid, _mac) in enumerate(rows):
             if guid == pad.sdl_guid:
-                return port, guid
+                return nth(i), guid
     return pad.index, pad.sdl_guid
 
 
