@@ -42,17 +42,34 @@ own buttons, so they change with the map:
 
 ## Per-emulator notes
 
-- **Cemu:** P1 is a Wii U GamePad or a Pro Controller; **+**/**−** picks,
-  remembered per game.
+- **Cemu:** P1 is a Wii U GamePad or a Pro Controller; **+** and **−**
+  together switch, remembered per game. *Why:* many Wii U games will not
+  boot without a GamePad, so it is the default, but some (Wind Waker HD) put
+  the map and items on the GamePad's own screen, which does not exist in
+  Game Mode.
 - **Dolphin, Wheel Wizard:** GameCube pads only; Wii remotes are left alone.
+  *Why:* Wii remotes live in a separate Dolphin config (`WiimoteNew.ini`)
+  with a pointer-based setup of their own. Support for them is planned.
 - **melonDS:** L3 swaps screens. **Azahar:** L3 swaps screens, R3 cycles
-  layouts.
+  layouts. *Why:* DS and 3DS games use two screens, and Game Mode gives no
+  easy way to change their layout, so Preflight binds the emulators' own
+  hotkeys to the stick clicks.
 - **shadPS4, Xenia Canary:** no P1 claim; they seat pads in their own order.
-- **Play!:** only one Steam Controller per game.
+  *Why:* neither has a setting for which pad is which player. shadPS4 seats
+  pads in SDL's order and Xenia at Steam's slot, so the screen shows that
+  order instead of offering a claim they would ignore.
+- **Play!:** only one Steam Controller per game. *Why:* Play! reads
+  controllers below Steam Input and tells them apart by hardware id, which
+  Preflight finds for normal pads. A Steam Controller only exists as Steam's
+  virtual pad, and every virtual pad looks the same to Play!, so a second one
+  would drive the first player too.
 - **PlayStation emulators** bind by position: Cross is the bottom button on
-  any pad.
+  any pad. *Why:* PlayStation buttons are shapes, not letters, so where a
+  button sits is what counts.
 - **Handhelds** remember the last controller played, except a Steam
-  Controller (it has no hardware id).
+  Controller. *Why:* a handheld has one player, remembered by the pad's
+  hardware id; a Steam Controller has none Preflight can see, only Steam's
+  virtual one.
 
 ## Where things live
 

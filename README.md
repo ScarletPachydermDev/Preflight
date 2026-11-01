@@ -28,7 +28,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage | Pro Controllers |
 | **Eden** | flatpak, AppImage | Pro Controllers. **Steam Input on only** |
-| **Dolphin** | flatpak | GameCube pads only; Wii remotes untouched. |
+| **Dolphin** | flatpak | GameCube pads only; Wii remotes untouched (support planned). |
 | **Wheel Wizard** | flatpak | writes Dolphin's GameCube pads |
 | **Cemu** | flatpak | P1 GamePad or Pro Controller (**+**/**−**, remembered per game) |
 | **gopher64** | flatpak | No rumble |
@@ -120,7 +120,7 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - A controller asleep during the check gets no binding at all.
 - Every player is set up as a Pro Controller; handheld and Joy-Con pair are not
   configurable here.
-- On Dolphin only GameCube pads are written. Wii remotes are left alone.
+- On Dolphin only GameCube pads are written. Wii remotes are left alone; support for them is planned.
 - Eden needs Steam Input **on**. With it off the bindings are written but
   the game gets no input, for reasons that are not yet understood —
   Preflight spots that case and says so on screen before the game starts.
