@@ -64,7 +64,7 @@ their own settings.
 The Steam Controller is the exception: Steam keeps Steam Input on for it even
 when a shortcut turns Steam Input off, so it always arrives as a virtual pad.
 
-Though tool can be used without Steam input if you prefer.
+Though tool can be used without Steam input if you prefer but most emulators from SelfSteam haven't been tested without it. Testing all emulators was an arduous task with SI on and SI off would be another monster itself (I'm lazy).
 
 ## How to use
 
