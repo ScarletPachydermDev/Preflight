@@ -16,7 +16,8 @@ Preflight reads the emulator out of that command and picks its config backend
 from it; with no backend for what it finds, it still runs the check and still
 launches, it just writes no bindings.
 
-Zero dependencies: ctypes against the system libSDL2 and libSDL2_ttf.
+Zero dependencies: ctypes against the system libSDL2 and libSDL2_ttf (or
+FreeType where SDL2_ttf is missing).
 
 Two behaviours here are empirical, established by phase0 against real
 hardware, not guesses:

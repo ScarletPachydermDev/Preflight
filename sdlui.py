@@ -1,5 +1,6 @@
 """
-Minimal fullscreen UI toolkit: ctypes bindings for system SDL2 + SDL2_ttf.
+Minimal fullscreen UI toolkit: ctypes bindings for system SDL2 + SDL2_ttf
+(or FreeType, where SDL2_ttf is missing).
 
 No pip packages. SteamOS has no pip and a read-only /usr, so everything here
 talks to the libraries already on the system.
@@ -210,10 +211,11 @@ def load_libraries():
         raise RuntimeError("libSDL2 not found")
 
     ttf = _load(["libSDL2_ttf-2.0.so.0", "libSDL2_ttf.so.0", "libSDL2_ttf.so"])
-    if ttf is None:
-        raise RuntimeError("libSDL2_ttf not found")
-
     _bind(sdl, ttf)
+    if ttf is None:
+        # SteamOS 3.9 dropped SDL2_ttf (a Steam Deck has sdl2-compat and
+        # SDL3_ttf only): draw text with FreeType itself instead.
+        ttf = FreeTypeTTF(sdl)
     return sdl, ttf
 
 
@@ -355,6 +357,8 @@ def _bind(sdl, ttf):
     sdl.SDL_GameControllerGetAttached.argtypes = [vp]
     sdl.SDL_GameControllerGetAttached.restype = ci
 
+    if ttf is None:
+        return
     ttf.TTF_Init.restype = ci
     ttf.TTF_OpenFont.argtypes, ttf.TTF_OpenFont.restype = [cp, ci], vp
     ttf.TTF_CloseFont.argtypes = [vp]
@@ -364,6 +368,127 @@ def _bind(sdl, ttf):
     ttf.TTF_GlyphMetrics.argtypes = [vp, ctypes.c_uint16] + [ctypes.POINTER(ci)] * 5
     ttf.TTF_GlyphMetrics.restype = ci
     ttf.TTF_Quit.restype = None
+
+
+class _FTFont:
+    def __init__(self, face, ascender, descender):
+        self.face, self.ascender, self.descender = face, ascender, descender
+
+
+class FreeTypeTTF:
+    """The handful of SDL2_ttf calls UI makes, done with FreeType through
+    ctypes, for systems without SDL2_ttf: SteamOS 3.9 dropped it, so
+    Preflight could not open at all on a Steam Deck. FreeType is the
+    engine SDL2_ttf is built on and is on every desktop Linux. Fonts it
+    cannot scale (colour emoji) open as None, which UI already treats as
+    "no glyph"."""
+
+    _LOAD_RENDER = 0x4
+    # Offsets into FreeType's public structs on 64-bit Linux (freetype.h):
+    # FT_FaceRec.glyph/.size, FT_SizeRec.metrics.ascender/descender
+    # (26.6 fixed point), and in FT_GlyphSlotRec the advance, the rendered
+    # FT_Bitmap (rows, width, pitch, buffer) and bitmap_left/top.
+    _FACE_GLYPH, _FACE_SIZE = 152, 160
+    _SIZE_ASCENDER, _SIZE_DESCENDER = 48, 56
+    _ADVANCE_X = 128
+    _ROWS, _WIDTH, _PITCH, _BUFFER, _LEFT, _TOP = 152, 156, 160, 168, 192, 196
+
+    def __init__(self, sdl):
+        self.sdl = sdl
+        ft = _load(["libfreetype.so.6", "libfreetype.so"])
+        if ft is None:
+            raise RuntimeError("neither libSDL2_ttf nor libfreetype found")
+        vp = ctypes.c_void_p
+        ft.FT_Init_FreeType.argtypes = [ctypes.POINTER(vp)]
+        ft.FT_New_Face.argtypes = [vp, ctypes.c_char_p, ctypes.c_long, ctypes.POINTER(vp)]
+        ft.FT_Set_Pixel_Sizes.argtypes = [vp, ctypes.c_uint, ctypes.c_uint]
+        ft.FT_Load_Char.argtypes = [vp, ctypes.c_ulong, ctypes.c_int32]
+        ft.FT_Done_Face.argtypes = [vp]
+        ft.FT_Done_FreeType.argtypes = [vp]
+        self.ft, self.lib, self._keep = ft, vp(), None
+
+    def _at(self, ctype, addr):
+        return ctype.from_address(addr).value
+
+    def TTF_Init(self):
+        return 0 if self.ft.FT_Init_FreeType(ctypes.byref(self.lib)) == 0 else -1
+
+    def TTF_Quit(self):
+        if self.lib:
+            self.ft.FT_Done_FreeType(self.lib)
+
+    def TTF_OpenFont(self, path, px):
+        face = ctypes.c_void_p()
+        if self.ft.FT_New_Face(self.lib, path, 0, ctypes.byref(face)) != 0:
+            return None
+        if self.ft.FT_Set_Pixel_Sizes(face, 0, px) != 0:
+            self.ft.FT_Done_Face(face)
+            return None
+        size = self._at(ctypes.c_void_p, face.value + self._FACE_SIZE)
+        return _FTFont(face, self._at(ctypes.c_long, size + self._SIZE_ASCENDER) >> 6,
+                       self._at(ctypes.c_long, size + self._SIZE_DESCENDER) >> 6)
+
+    def TTF_CloseFont(self, font):
+        if font:
+            self.ft.FT_Done_Face(font.face)
+
+    def TTF_FontAscent(self, font):
+        return font.ascender
+
+    def _glyph(self, font, codepoint):
+        """(left, top, width, rows, pitch, bitmap, advance) or None."""
+        if self.ft.FT_Load_Char(font.face, codepoint, self._LOAD_RENDER) != 0:
+            return None
+        slot = self._at(ctypes.c_void_p, font.face.value + self._FACE_GLYPH)
+        rows = self._at(ctypes.c_uint, slot + self._ROWS)
+        pitch = self._at(ctypes.c_int, slot + self._PITCH)
+        buf = self._at(ctypes.c_void_p, slot + self._BUFFER)
+        bitmap = ctypes.string_at(buf, abs(pitch) * rows) if buf and rows else b""
+        return (self._at(ctypes.c_int, slot + self._LEFT), self._at(ctypes.c_int, slot + self._TOP),
+                self._at(ctypes.c_uint, slot + self._WIDTH), rows, pitch, bitmap,
+                self._at(ctypes.c_long, slot + self._ADVANCE_X) >> 6)
+
+    def TTF_GlyphMetrics(self, font, codepoint, minx, maxx, miny, maxy, advance):
+        g = self._glyph(font, codepoint)
+        if g is None:
+            return -1
+        left, top, width, rows, _pitch, _bitmap, adv = g
+        minx._obj.value, maxx._obj.value = left, left + width
+        miny._obj.value, maxy._obj.value = top - rows, top
+        advance._obj.value = adv
+        return 0
+
+    def TTF_RenderUTF8_Blended(self, font, text, color):
+        """An SDL surface of text in color on transparent, or None."""
+        height = max(font.ascender - font.descender, 1)
+        glyphs, x = [], 0
+        for ch in text.decode("utf-8", "replace"):
+            g = self._glyph(font, ord(ch))
+            if g is None:
+                continue
+            left, top, width, rows, pitch, bitmap, adv = g
+            glyphs.append((x + left, font.ascender - top, width, rows, pitch, bitmap))
+            x += adv
+        width = max([x] + [gx + gw for gx, _y, gw, *_ in glyphs]) or 1
+        alpha = bytearray(width * height)
+        for gx, gy, gw, gh, pitch, bitmap in glyphs:
+            for row in range(gh):
+                y = gy + row
+                if not 0 <= y < height:
+                    continue
+                for col, a in enumerate(bitmap[row * pitch:row * pitch + gw]):
+                    i = y * width + gx + col
+                    if 0 <= gx + col < width and a > alpha[i]:
+                        alpha[i] = a
+        rgba = bytearray(width * height * 4)
+        n = len(alpha)
+        rgba[0::4], rgba[1::4], rgba[2::4] = bytes([color.r]) * n, bytes([color.g]) * n, bytes([color.b]) * n
+        rgba[3::4] = alpha
+        # Kept alive until the caller has turned the surface into a texture.
+        self._keep = ctypes.create_string_buffer(bytes(rgba), len(rgba))
+        return self.sdl.SDL_CreateRGBSurfaceFrom(
+            self._keep, width, height, 32, width * 4,
+            0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000)
 
 
 class UI:

@@ -57,7 +57,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 
 - SteamOS or a Linux system with Steam
 - One of the emulators above
-- SDL2 and SDL2_ttf — already present on SteamOS
+- SDL2, and SDL2_ttf or FreeType for text — present on SteamOS (3.9 dropped SDL2_ttf; FreeType is used then)
 - `unsquashfs` for AppImage builds — already present on SteamOS
 
 No Python packages to install. SteamOS has no `pip` and a read-only `/usr`, so
