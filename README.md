@@ -52,8 +52,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 - Handhelds remember the last controller played, except a Steam Controller
   (it has no hardware id).
 - Eden may pop up its own multiplayer controller window during gameplay,
-  when a game asks to pick controllers (seen in Rhythm Paradise Groove and
-  Big Brain Academy). Ryubing skips that screen.
+  when a game asks to pick controllers. Ryubing skips that screen.
 - All verified with Steam Input **on**. Steam Input off is untested on most.
 
 ### About Steam Input
