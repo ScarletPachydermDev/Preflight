@@ -7,7 +7,7 @@ player they are and that their buttons land where the labels say, then Player 1
 holds `+` and the game starts. It writes Ryujinx's `Config.json` and hands off.
 
 **Status: working.** First successful real launch 2026-08-09 — four controllers
-drove Mario Kart 8 correctly, with zero `No matching controllers` warnings in
+drove a four-player game correctly, with zero `No matching controllers` warnings in
 Ryujinx's log.
 
 Target: Valve Steam Machine, SteamOS Game Mode, Ryubing installed as the
@@ -414,9 +414,9 @@ a report of "button X does the wrong thing" has to start with the press log.
   mode to fall back to, so a family session is routinely a MIXED set, and
   anything here that assumes "Steam Input on" or "off" as a global state is
   wrong.
-- Mario Kart asks for the Switch's `ShowControllerSupport` applet and Ryujinx
+- Some games ask for the Switch's `ShowControllerSupport` applet and Ryujinx
   stubs it (`ControllerApplet ReturnResult 1 1`). Not caused here, but it is
-  why that title screen behaves oddly.
+  why such a title screen can behave oddly.
 
 ## 7. Supporting other emulators
 
@@ -739,7 +739,7 @@ has SDL 2.32.10 and lists pads in the same order with the same GUIDs as
 ours, so the index is taken at write time like Flycast's. Raw numbers come
 from each pad's own SDL mapping. `_write_mupen_cfg` is shared with RMG.
 
-**RPCS3, as of 2026-10-01 (verified in ICO).** From
+**RPCS3, as of 2026-10-01 (verified in game).** From
 RPCS3's source. `input_configs/global/Default.yml` (a per-title one wins);
 with none, player 1 is the keyboard and no pad works. Each "Player N Input"
 gets Handler SDL and Device "<SDL gamepad name> <n>", n counting that name
@@ -821,8 +821,8 @@ measurement was taken in the wrong one.
 
 How it was actually found, for next time:
 
-1. **Never trust a game's behaviour as a readout.** GoldenEye has its own
-   Control Styles; its C buttons strafe and look. An input-test ROM inside
+1. **Never trust a game's behaviour as a readout.** A game can have its own
+   control styles; its C buttons may strafe and look. An input-test ROM inside
    the emulator shows the lit button directly — the `n64 input test` Steam
    shortcut (`mimi-27daaf4.z64`), now preflight-wrapped.
 2. **Measure through the consumer's library, not ours.** A probe on the
@@ -1010,7 +1010,7 @@ which is a nasty way to fail: check for output, never for the exit code.
     by construction. Pads are matched between the two views by MAC, and a
     Steam virtual pad by its GUID, which carries a unique name-CRC.
   * **The flatpak (`dev.eden_emu.eden`) works too, verified 2026-09-15** on
-    Rhythm Heaven, and needed one fix rather than a new backend. Its config
+    a real game, and needed one fix rather than a new backend. Its config
     lands at `~/.var/app/dev.eden_emu.eden/config/eden/qt-config.ini`, which
     `eden_config_target()` already resolved, and it ships **no SDL of its
     own**: unlike the AppImage's static SDL 2.33 it links the KDE runtime's

@@ -1902,7 +1902,7 @@ def eden_identity(pad, rows):
         # order. With Steam Input every virtual pad zeroes to one GUID, and
         # the real pads Steam hides from games are listed between them in
         # our enumeration — so the index gave 0,2,4,6 for four virtual pads,
-        # P3/P4 pointed at nothing and Rhythm Paradise Groove saw two
+        # P3/P4 pointed at nothing and a four-player game saw two
         # players (2026-10-15). Two players had worked only because the
         # virtual pads happened to be listed first.
         def nth(i):
