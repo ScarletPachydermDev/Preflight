@@ -51,8 +51,9 @@ players wait while you work out whose controller is which and inputs work. Just 
 - PlayStation emulators bind by position: Cross is the bottom button (south) on any pad for example.
 - Handhelds remember the last controller played, except a Steam Controller
   (it has no hardware id).
-- Switch emulators (Ryubing, Eden) may pop up their own multiplayer
-  controller window during gameplay, when a game asks to pick controllers.
+- Eden may pop up its own multiplayer controller window during gameplay,
+  when a game asks to pick controllers (seen in Rhythm Paradise Groove and
+  Big Brain Academy). Ryubing skips that screen.
 - All verified with Steam Input **on**. Steam Input off is untested on most.
 
 ### About Steam Input

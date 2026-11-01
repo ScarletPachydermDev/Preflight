@@ -53,8 +53,9 @@ predicts the press in the game.
   (it has no hardware id).
 - DuckStation takes four players through the multitap, set up as soon as
   three pads are claimed.
-- Switch emulators (Ryubing, Eden) may pop up their own multiplayer
-  controller window during gameplay, when a game asks to pick controllers.
+- Eden may pop up its own multiplayer controller window during gameplay,
+  when a game asks to pick controllers (seen in Rhythm Paradise Groove and
+  Big Brain Academy). Ryubing skips that screen.
 - All verified with Steam Input **on**. Steam Input off is untested on most.
 - Preflight recognises the emulator from the launch command after `--`:
   its Flatpak id, or the AppImage's name.
