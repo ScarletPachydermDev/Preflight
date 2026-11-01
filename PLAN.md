@@ -171,8 +171,10 @@ printed on it, and the manual `L`+`R` toggle remains the honest answer.
 **Steam Input stays ON.** It was disabled for a long stretch, because it turns
 every pad into an identical Valve virtual device. Two things changed: ids now
 come from the emulator's own SDL, and pads are matched by name-CRC, which
-vendor/product alone cannot do. With Steam Input *off* the Steam Controller
-reaches this tool but never the emulator — it exists only through Steam Input.
+vendor/product alone cannot do. A Steam Controller is a virtual pad either
+way: Steam keeps Steam Input on for it even when a shortcut turns it off
+(measured 2026-09-21, see section 6), so with Steam Input off a session is a
+mixed set of raw pads and that one virtual pad.
 
 **One screen, and taps do nothing.** Every action is a hold or a combo, so
 players can mash buttons to test them without setting anything off.
