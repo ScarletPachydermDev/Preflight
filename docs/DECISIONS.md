@@ -7,9 +7,9 @@ full history is in [PLAN.md](../PLAN.md).
 
 It was off for a long time, because it makes every pad an identical virtual
 device. Two things changed that: ids now come from the emulator's own SDL,
-and pads are matched by name-CRC. With Steam Input off, the Steam Controller
-reaches Preflight but never the emulator: it exists only through Steam
-Input.
+and pads are matched by name-CRC. A Steam Controller is a virtual pad
+either way: Steam keeps Steam Input on for it even when a shortcut turns
+Steam Input off.
 
 ### No guessing which pad is which
 

@@ -83,8 +83,8 @@ works around it by reading the physical devices Steam hides and matching each
 one to its virtual counterpart, so your controllers keep their real names and
 their own settings.
 
-The Steam Controller in particular *only* exists through Steam Input — with it
-off, that pad reaches Preflight but never reaches the emulator.
+The Steam Controller is the exception: Steam keeps Steam Input on for it even
+when a shortcut turns Steam Input off, so it always arrives as a virtual pad.
 
 Though tool can be used without Steam input if you prefer.
 
