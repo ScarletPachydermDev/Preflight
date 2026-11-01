@@ -53,28 +53,6 @@ players wait while you work out whose controller is which and inputs work. Just 
   (it has no hardware id).
 - All verified with Steam Input **on**. Steam Input off is untested on most.
 
-## Documentation
-
-| | |
-|---|---|
-| [Install](docs/INSTALL.md) | Requirements, with SelfSteam or by hand, Steam Input, updating |
-| [Using Preflight](docs/USING.md) | The check screen, controls, players, per-emulator notes, where files live |
-| [Supported emulators](docs/SUPPORTED.md) | Emulators, packages, which map each one gets |
-| [How it works](docs/ARCHITECTURE.md) | Telling pads apart, matching emulator ids, writing configs |
-| [Decisions](docs/DECISIONS.md) | Why things are the way they are |
-| [Troubleshooting](docs/TROUBLESHOOTING.md) | Logs, wrong buttons, diagnostics |
-| [Development](docs/DEVELOPMENT.md) | Adding an emulator, test tools |
-
-## Requirements
-
-- Linux on x86_64 (x64): SteamOS, or another Linux system with Steam. No Windows or macOS
-- One of the emulators above
-- SDL2, and SDL2_ttf or FreeType for text — present on SteamOS (3.9 dropped SDL2_ttf; FreeType is used then)
-- `unsquashfs` for AppImage builds — already present on SteamOS
-
-No Python packages to install. SteamOS has no `pip` and a read-only `/usr`, so
-Preflight talks to the libraries already on the system.
-
 ### About Steam Input
 
 With Steam Input on, every controller is presented to the game as an identical
