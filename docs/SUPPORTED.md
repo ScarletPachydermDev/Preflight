@@ -7,7 +7,7 @@ Emulators tab, where Preflight is one toggle away.
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage | Pro Controllers |
 | **Eden** | flatpak, AppImage | Pro Controllers. **Steam Input on only** |
-| **Citron** | AppImage | Pro Controllers, written as for Eden |
+| **Citron** (Nextendo build) | AppImage | Pro Controllers, written as for Eden. Works with Steam Input on or off |
 | **Dolphin** | flatpak | GameCube pads only; Wii remotes untouched. |
 | **Wheel Wizard** | flatpak | writes Dolphin's GameCube pads |
 | **Cemu** | flatpak | P1 GamePad or Pro Controller (**+**/**−**, remembered per game) |
