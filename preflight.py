@@ -1409,7 +1409,11 @@ BACKENDS = {
     "ryujinx": ("ryujinx", "ryubing"),
     "wheelwizard": ("wheelwizard",),
     "dolphin": ("dolphin",),
-    "eden": ("eden",),
+    # Citron (Neo, and SelfSteam's Nextendo build) is the same yuzu lineage:
+    # qt-config.ini in user/config beside a portable AppImage, GUID CRC
+    # zeroed, ports numbered per GUID — so Eden's backend writes it. Its SDL
+    # is SDL3 built in, which names a Steam virtual pad the same way.
+    "eden": ("eden", "citron"),
     "cemu": ("cemu",),
     "gopher64": ("gopher",),
     "duckstation": ("duckstation",),

@@ -28,6 +28,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage | Pro Controllers |
 | **Eden** | flatpak, AppImage | Pro Controllers. **Steam Input on only** |
+| **Citron** | AppImage | Pro Controllers, written as for Eden |
 | **Dolphin** | flatpak | GameCube pads only; Wii remotes untouched (support planned). |
 | **Wheel Wizard** | flatpak | writes Dolphin's GameCube pads |
 | **Cemu** | flatpak | P1 GamePad or Pro Controller (**+**/**−**, remembered per game) |

@@ -7,6 +7,7 @@ Emulators tab, where Preflight is one toggle away.
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage | Pro Controllers |
 | **Eden** | flatpak, AppImage | Pro Controllers. **Steam Input on only** |
+| **Citron** | AppImage | Pro Controllers, written as for Eden |
 | **Dolphin** | flatpak | GameCube pads only; Wii remotes untouched. |
 | **Wheel Wizard** | flatpak | writes Dolphin's GameCube pads |
 | **Cemu** | flatpak | P1 GamePad or Pro Controller (**+**/**−**, remembered per game) |
@@ -34,7 +35,7 @@ predicts the press in the game.
 
 | Map | Emulators |
 |---|---|
-| Switch | Ryubing, Eden, Cemu |
+| Switch | Ryubing, Eden, Citron, Cemu |
 | GameCube | Dolphin, Wheel Wizard |
 | N64 | gopher64, Rosalie's Mupen GUI, M64Py |
 | PlayStation | DuckStation, PCSX2, Play!, RPCS3, shadPS4 |
