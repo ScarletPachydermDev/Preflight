@@ -27,7 +27,7 @@ players wait while you work out whose controller is which and inputs work. Just 
 | Emulator | Package | Notes |
 |:---|:---|:---|
 | **Ryubing (Ryujinx)** | flatpak, AppImage | Pro Controllers |
-| **Eden** | flatpak, AppImage | Pro Controllers. **Steam Input on only** |
+| **Eden** | flatpak, AppImage | Pro Controllers |
 | **Citron** (Nextendo build) | AppImage | Pro Controllers, written as for Eden. Works with Steam Input on or off |
 | **Dolphin** | flatpak | GameCube pads only; Wii remotes untouched (support planned). |
 | **Wheel Wizard** | flatpak | writes Dolphin's GameCube pads |
@@ -102,10 +102,6 @@ Colours and rumble pacing live in `~/.config/preflight/theme.json`.
 - Every player is set up as a Pro Controller; handheld and Joy-Con pair are not
   configurable here.
 - On Dolphin only GameCube pads are written. Wii remotes are left alone; support for them is planned.
-- Eden needs Steam Input **on**. With it off the bindings are written but
-  the game gets no input — Preflight spots that case and says so on screen
-  before the game starts. Citron works either way, so the warning can be
-  ignored there.
 - If a pad sleeps or wakes in the moment between saving and the emulator
   starting, its assignment can shift.
 - Preflight don't pair controllers. Pair them in your OS first.

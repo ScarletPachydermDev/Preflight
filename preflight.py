@@ -2079,17 +2079,6 @@ def eden_player_values(sdl, pad, port, sdl_guid=None, mapping=""):
 VALVE_VIRTUAL = (0x28de, 0x11ff)
 
 
-def steam_input_off(pads):
-    """True when a pad is reaching us as real hardware.
-
-    With Steam Input on, every pad arrives as an identical Valve virtual
-    controller; with it off, the real vendor and product come through. The
-    Steam Controller stays virtual either way, since Valve always manages its
-    own pad, so one non-Valve pad is enough to tell.
-    """
-    return any((p.vendor, p.product) != VALVE_VIRTUAL for p in pads)
-
-
 def log_layouts(pads):
     """What this tool believes each pad IS, at the moment it matters.
 
@@ -7626,13 +7615,10 @@ def main():
                 pads, unmapped = rescan()
 
             warnings = []
-            # Eden only receives input when Steam Input is on, for reasons
-            # not yet understood (PLAN §7). Nothing we write helps, so the
-            # honest thing is to say so before the game starts rather than
-            # leave four people prodding dead controllers.
+            # The old "turn Steam Input on" alert for Eden is gone: the dead
+            # input it warned about was raw pads bound with HIDAPI numbers
+            # (fixed 0.2.151, verified on Citron with Steam Input off).
             alert = None
-            if backend == "eden" and pads and steam_input_off(pads):
-                alert = "Turn Steam Input ON for this game \u2014 Eden gets no input without it"
             if backend is None:
                 warnings.append(f"No controller-config backend for "
                                 f"{target or 'this command'} — the check runs, "

@@ -37,7 +37,7 @@ and it is also how Preflight knows which emulator it is configuring.
 ## Steam Input
 
 Set the shortcut's controller layout to **Steam Input on**. That is the
-setup everything is tested with. Eden and DuckStation need it on. A Steam
+setup everything is tested with. DuckStation needs it on. A Steam
 Controller goes through Steam Input either way: Steam keeps it on for that
 pad even when a shortcut turns it off. See
 [Decisions](DECISIONS.md#steam-input-stays-on).
