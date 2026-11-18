@@ -1847,6 +1847,8 @@ class G(ctypes.Structure):
 sdl.SDL_JoystickGetDeviceGUID.restype = G
 sdl.SDL_JoystickGetDeviceGUID.argtypes = [ctypes.c_int]
 sdl.SDL_JoystickGetGUIDString.argtypes = [G, ctypes.c_char_p, ctypes.c_int]
+sdl.SDL_GameControllerMappingForDeviceIndex.restype = ctypes.c_void_p
+sdl.SDL_free.argtypes = [ctypes.c_void_p]
 for f in ("SDL_JoystickNameForIndex", "SDL_JoystickPathForIndex"):
     if hasattr(sdl, f):
         getattr(sdl, f).restype = ctypes.c_char_p
@@ -1868,13 +1870,20 @@ for i in range(sdl.SDL_NumJoysticks()):
     path = b""
     if hasattr(sdl, "SDL_JoystickPathForIndex"):
         path = sdl.SDL_JoystickPathForIndex(i) or b""
-    print(i, b.value.decode(), mac_of(path.decode(errors="replace")), sep="\t")
+    ptr = sdl.SDL_GameControllerMappingForDeviceIndex(i)
+    mapping = ""
+    if ptr:
+        mapping = ctypes.string_at(ptr).decode(errors="replace")
+        sdl.SDL_free(ptr)
+    print(i, b.value.decode(), mac_of(path.decode(errors="replace")),
+          mapping.replace("\t", " "), sep="\t")
 sdl.SDL_Quit()
 """
 
 
 def eden_devices():
-    """[(port, sdl_guid, mac)] as Eden will enumerate them: HIDAPI off."""
+    """[(port, sdl_guid, mac, mapping)] as Eden will enumerate them:
+    HIDAPI off. The mapping is the one Eden will read buttons through."""
     lib = "libSDL2-2.0.so.0"
     key, _, value = EDEN_NO_HIDAPI.partition("=")
     env = dict(os.environ, **{key: value})
@@ -1889,13 +1898,14 @@ def eden_devices():
     rows = []
     for line in out.stdout.splitlines():
         bits = line.split("\t")
-        if len(bits) == 3 and bits[0].isdigit():
-            rows.append((int(bits[0]), bits[1], bits[2]))
+        if len(bits) >= 3 and bits[0].isdigit():
+            rows.append((int(bits[0]), bits[1], bits[2],
+                         bits[3] if len(bits) > 3 else ""))
     return rows or None
 
 
 def eden_identity(pad, rows):
-    """(port, guid) for this pad in Eden's own enumeration.
+    """(port, guid, mapping) for this pad in Eden's own enumeration.
 
     Matched by MAC for a physical pad, and by GUID for a Steam virtual one,
     which has no MAC but does carry a unique name-CRC.
@@ -1914,13 +1924,13 @@ def eden_identity(pad, rows):
             return sum(1 for r in rows[:i] if eden_guid(r[1]) == g)
 
         if pad.mac:
-            for i, (_port, guid, mac) in enumerate(rows):
+            for i, (_port, guid, mac, mapping) in enumerate(rows):
                 if mac and mac.lower() == pad.mac.lower():
-                    return nth(i), guid
-        for i, (_port, guid, _mac) in enumerate(rows):
+                    return nth(i), guid, mapping
+        for i, (_port, guid, _mac, mapping) in enumerate(rows):
             if guid == pad.sdl_guid:
-                return nth(i), guid
-    return pad.index, pad.sdl_guid
+                return nth(i), guid, mapping
+    return pad.index, pad.sdl_guid, ""
 
 
 def eden_guid(sdl_guid_hex):
@@ -1930,6 +1940,56 @@ def eden_guid(sdl_guid_hex):
     b = bytearray(bytes.fromhex(sdl_guid_hex))
     b[2:4] = b"\x00\x00"
     return bytes(b).hex()
+
+
+# SDL's names for its button and axis enums, in enum order: how a mapping
+# string spells them.
+SDL_BUTTON_NAMES = ("a", "b", "x", "y", "back", "guide", "start", "leftstick",
+                    "rightstick", "leftshoulder", "rightshoulder", "dpup",
+                    "dpdown", "dpleft", "dpright", "misc1")
+SDL_AXIS_NAMES = ("leftx", "lefty", "rightx", "righty", "lefttrigger",
+                  "righttrigger")
+
+
+def mapping_fragment(mapping, kind, index):
+    """eden_fragment, read from a mapping string instead of an open pad.
+
+    Needed because Eden runs with HIDAPI off: a raw Xbox or Stadia pad then
+    comes through evdev with different raw numbers from the HIDAPI ones our
+    own SDL sees. Binding the HIDAPI numbers put Start on L in the game
+    (2026-11-18, Steam Input off). Steam's virtual pads number alike both
+    ways, which is why it only showed with Steam Input off.
+    """
+    names = SDL_AXIS_NAMES if kind == "axis" else SDL_BUTTON_NAMES
+    if index >= len(names):
+        return None
+    for field in mapping.split(","):
+        key, _, val = field.partition(":")
+        if key != names[index] or not val:
+            continue
+        val = val.lstrip("+-").rstrip("~")
+        if val.startswith("b") and val[1:].isdigit():
+            return f"button:{val[1:]}"
+        if val.startswith("a") and val[1:].isdigit():
+            return f"axis:{val[1:]},threshold:0.500000,invert:+"
+        if val.startswith("h"):
+            hat, _, mask = val[1:].partition(".")
+            direction = (EDEN_HAT_DIRECTION.get(int(mask))
+                         if mask.isdigit() else None)
+            if hat.isdigit() and direction:
+                return f"hat:{hat},direction:{direction}"
+    return None
+
+
+def mapping_stick(mapping, x_axis, y_axis):
+    axes = []
+    for axis in (x_axis, y_axis):
+        frag = mapping_fragment(mapping, "axis", axis)
+        if not frag or not frag.startswith("axis:"):
+            return None
+        axes.append(frag.split(",")[0][5:])
+    return (f"axis_x:{axes[0]},axis_y:{axes[1]},offset_x:0.000000,"
+            f"offset_y:0.000000,invert_x:+,invert_y:+,deadzone:0.150000")
 
 
 def eden_fragment(sdl, handle, kind, index):
@@ -1963,8 +2023,23 @@ def eden_stick(sdl, handle, x_axis, y_axis):
             f"invert_x:+,invert_y:+,deadzone:0.150000")
 
 
-def eden_player_values(sdl, pad, port, sdl_guid=None):
-    """Every player_<n>_* value for one pad, without the player prefix."""
+def eden_player_values(sdl, pad, port, sdl_guid=None, mapping=""):
+    """Every player_<n>_* value for one pad, without the player prefix.
+
+    With a mapping string (Eden's own HIDAPI-off view), bindings come from
+    it; otherwise from our open handle."""
+    if mapping:
+        def bind(kind, i):
+            return mapping_fragment(mapping, kind, i)
+
+        def stick(x, y):
+            return mapping_stick(mapping, x, y)
+    else:
+        def bind(kind, i):
+            return eden_fragment(sdl, pad.handle, kind, i)
+
+        def stick(x, y):
+            return eden_stick(sdl, pad.handle, x, y)
     guid = eden_guid(sdl_guid or pad.sdl_guid)
     head = f"engine:sdl,port:{port},guid:{guid}"
     face = FACE_MIRRORED if pad.swap_faces else FACE_IDENTITY
@@ -1980,19 +2055,19 @@ def eden_player_values(sdl, pad, port, sdl_guid=None):
         wanted[key] = EDEN_FACE_BTN[letter]
 
     missing = []
-    for key, button in wanted.items():
-        frag = eden_fragment(sdl, pad.handle, "button", button)
+    for key, btn in wanted.items():
+        frag = bind("button", btn)
         out[key] = f'"{head},{frag}"' if frag else "[empty]"
         if not frag:
             missing.append(key)
     for key, axis in EDEN_TRIGGERS.items():
-        frag = eden_fragment(sdl, pad.handle, "axis", axis)
+        frag = bind("axis", axis)
         out[key] = f'"{head},{frag}"' if frag else "[empty]"
         if not frag:
             missing.append(key)
     for key, (x, y) in (("lstick", (sdlui.AXIS_LEFTX, sdlui.AXIS_LEFTY)),
                         ("rstick", (sdlui.AXIS_RIGHTX, sdlui.AXIS_RIGHTY))):
-        frag = eden_stick(sdl, pad.handle, x, y)
+        frag = stick(x, y)
         out[key] = f'"{head},{frag}"' if frag else "[empty]"
         if not frag:
             missing.append(key)
@@ -2165,8 +2240,9 @@ def write_eden_config(cfg_path, pads, sdl):
             continue
         # Eden's port is an SDL enumeration index — but of ITS enumeration,
         # which is not ours unless we pin the driver. Same for the guid.
-        port, raw_guid = eden_identity(pad, rows)
-        fields, missing = eden_player_values(sdl, pad, port, raw_guid)
+        port, raw_guid, mapping = eden_identity(pad, rows)
+        fields, missing = eden_player_values(sdl, pad, port, raw_guid,
+                                             mapping)
         if missing:
             problems.append(f"{pad.label}: no SDL mapping for "
                             f"{', '.join(missing[:3])}")
