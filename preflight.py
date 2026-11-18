@@ -2049,15 +2049,21 @@ def log_pads(pads, when):
               f"name={pad.gc_name or pad.name!r}", flush=True)
 
 
+def _eden_dir_name(app_id=None, exe=None):
+    """Eden's config folder name, or Citron's when the launch is Citron."""
+    return "citron" if "citron" in (exe or app_id or "").lower() else "eden"
+
+
 def find_eden_config(app_id=None, exe=None):
+    name = _eden_dir_name(app_id, exe)
     candidates = []
     if exe:
         base = os.path.dirname(os.path.abspath(exe))
         candidates.append(os.path.join(base, "user", "config", "qt-config.ini"))
     elif app_id:
         candidates.append(os.path.expanduser(
-            f"~/.var/app/{app_id}/config/eden/qt-config.ini"))
-    candidates.append(os.path.expanduser("~/.config/eden/qt-config.ini"))
+            f"~/.var/app/{app_id}/config/{name}/qt-config.ini"))
+    candidates.append(os.path.expanduser(f"~/.config/{name}/qt-config.ini"))
     for path in candidates:
         if os.path.isfile(path):
             return path
@@ -2071,10 +2077,11 @@ def eden_config_target(app_id=None, exe=None):
     found = find_eden_config(app_id, exe)
     if found:
         return found
+    name = _eden_dir_name(app_id, exe)
     if app_id:
         return os.path.expanduser(
-            f"~/.var/app/{app_id}/config/eden/qt-config.ini")
-    return os.path.expanduser("~/.config/eden/qt-config.ini")
+            f"~/.var/app/{app_id}/config/{name}/qt-config.ini")
+    return os.path.expanduser(f"~/.config/{name}/qt-config.ini")
 
 
 def set_ini_keys(path, section, values):
