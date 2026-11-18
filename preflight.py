@@ -7467,6 +7467,16 @@ def main():
     slots["by_player_index"] = backend == "xenia"
     slots["by_sdl_order"] = backend == "shadps4"
     pads, unmapped = scan_pads(sdl)
+    # Diagnostic: Steam can hand us SDL_GAMECONTROLLERCONFIG, which beats
+    # SDL's own mapping. Log what each pad is really read through.
+    env_cfg = os.environ.get("SDL_GAMECONTROLLERCONFIG")
+    print(f"env SDL_GAMECONTROLLERCONFIG: "
+          f"{'unset' if env_cfg is None else f'{len(env_cfg.splitlines())} line(s)'}",
+          flush=True)
+    for line in (env_cfg or "").splitlines():
+        print(f"env mapping: {line}", flush=True)
+    for p in pads:
+        print(f"mapping: '{p.name}' {_pad_mapping(sdl, p)}", flush=True)
     apply_known(pads, known)
     pads = resolve_slots(pads, slots)
     # Only Ryujinx keeps bindings we did not write; Dolphin's are replaced
